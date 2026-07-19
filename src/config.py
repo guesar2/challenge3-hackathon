@@ -10,17 +10,17 @@ evolution times.
 
 N = 6                       # number of spins in the periodic chain
 J = 1.0                     # ZZ coupling strength
-H_VALUES = (0.5, 1.0, 1.5)  # target transverse fields to probe (critical point at h/J=1)
+H_VALUES = (0.5, 1.0, 2.0)  # target transverse fields to probe (critical point at h/J=1)
 
-H_INIT = 2.0                # starting transverse field for adiabatic sweeps (deep paramagnetic)
+H_INIT = 4.0                # starting transverse field for adiabatic sweeps (deep paramagnetic)
 
 # Adiabatic sweep
-ADIABATIC_DT = 0.05
-ADIABATIC_RATE_REF = 0.05   # target |dh/dt|, sets sweep duration per h_target
+ADIABATIC_DT = 0.02
+ADIABATIC_RATE_REF = 0.022   # target |dh/dt|, sets sweep duration per h_target
 
 # Fixed-Hamiltonian time evolution (quench dynamics from a product state)
-QUENCH_DT = 0.1
-QUENCH_STEPS = 200          # total evolution time = QUENCH_DT * QUENCH_STEPS
+QUENCH_DT = 0.05
+QUENCH_STEPS = 400          # total evolution time = QUENCH_DT * QUENCH_STEPS
 QUENCH_INITIAL_STATE = None  # None -> defaults to |00...0>
 
 # Where to save figures. Set to None to skip saving (only meaningful if
