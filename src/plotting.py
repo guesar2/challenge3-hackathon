@@ -65,13 +65,15 @@ def plot_adiabatic_convergence(h_values, trotter_data, ed_results, rate_ref, sav
 
 
 def plot_phase_transition(h_values, trotter_data, ed_results, rate_ref, save_dir=None):
-    """Final <Z> and <X> vs. target h/J: Trotter vs. ED, marking the critical point."""
-    fig, (ax2, ax3) = plt.subplots(1, 2, figsize=(12, 4.5))
+    """Final <Z>, <X>, and <Zi Zi+1> vs. target h/J: Trotter vs. ED, marking the critical point."""
+    fig, (ax2, ax3, ax4) = plt.subplots(1, 3, figsize=(17, 4.5))
 
     z_final = [trotter_data[h]['z_final'] for h in h_values]
     z_ed = [next(r['mz_rms'] for r in ed_results if r['h'] == h) for h in h_values]
     x_final = [trotter_data[h]['x_final'] for h in h_values]
     x_ed = [next(r['mx'] for r in ed_results if r['h'] == h) for h in h_values]
+    mzz_final = [trotter_data[h]['mzz_final'] for h in h_values]
+    mzz_ed = [next(r['mzz'] for r in ed_results if r['h'] == h) for h in h_values]
 
     ax2.plot(h_values, z_final, 'bo-', markersize=8, label=f'Adiabatic (rate={rate_ref:.3f})')
     ax2.plot(h_values, z_ed, 'rs--', markersize=8, label='ED (ground state)')
@@ -90,6 +92,15 @@ def plot_phase_transition(h_values, trotter_data, ed_results, rate_ref, save_dir
     ax3.set_title('Quantum Phase Transition (Finite Size) - <X>')
     ax3.grid(True, alpha=0.3)
     ax3.legend()
+
+    ax4.plot(h_values, mzz_final, 'bo-', markersize=8, label=f'Adiabatic (rate={rate_ref:.3f})')
+    ax4.plot(h_values, mzz_ed, 'rs--', markersize=8, label='ED (ground state)')
+    ax4.axvline(x=1.0, color='gray', linestyle=':', alpha=0.7, label='Critical h/J=1')
+    ax4.set_xlabel('Target h / J')
+    ax4.set_ylabel(r'$\langle Z_i Z_{i+1} \rangle$')
+    ax4.set_title('Quantum Phase Transition (Finite Size) - <Zi Zi+1>')
+    ax4.grid(True, alpha=0.3)
+    ax4.legend()
 
     _finalize(fig, 'phase_transition.png', save_dir)
     return fig
