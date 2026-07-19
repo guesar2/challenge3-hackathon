@@ -3,11 +3,6 @@ trotter_simulation.py
 
 Exact (noiseless) statevector propagation through Trotterized circuits.
 
-The original notebook had two near-duplicate functions (run_adiabatic_exact
-and run_trotter_fixed_hamiltonian) that repeated the same observable setup
-and step loop, differing only in whether h/J are time-dependent (adiabatic
-sweep) or fixed. They're unified here as a single _propagate() driver, with
-two thin, descriptive wrappers preserving the original entry points.
 """
 import numpy as np
 from qiskit.quantum_info import Statevector
@@ -48,18 +43,27 @@ def _propagate(N, steps, dt, initial_state: Statevector, schedule_fn, mirror=Tru
     return times, z_rms, mzz, x_exp
 
 
-def run_adiabatic_exact(N, steps, h_target, J_target, dt, mirror=True, h_init=DEFAULT_H_INIT):
-    """Linearly ramp h: h_init -> h_target (J: 0 -> J_target) over `steps` steps,
+def run_adiabatic_exact(N, ramp_steps, h_target, J_target, dt, mirror=True, h_init=DEFAULT_H_INIT,
+                         hold_steps=0):
+    """Linearly ramp h: h_init -> h_target (J: 0 -> J_target) over `ramp_steps` steps,
     starting from the |+...+> product state (ground state at h -> infinity).
+
+    If hold_steps > 0, continues propagating for that many extra steps at the
+    fixed final (h_target, J_target) after the ramp completes. This lets the
+    convergence plot show whether the state has actually settled onto the
+    ground state, rather than just happening to reach it right as the ramp ends.
     """
     def schedule(step, s):
-        h_eff = (1 - s) * h_init + s * h_target
-        J_eff = s * J_target
+        ramp_step = min(step, ramp_steps)
+        s_ramp = ramp_step / ramp_steps
+        h_eff = (1 - s_ramp) * h_init + s_ramp * h_target
+        J_eff = s_ramp * J_target
         return h_eff, J_eff
 
     initial_state = Statevector.from_label('+' * N)
-    times, z_rms, mzz, x_exp = _propagate(N, steps, dt, initial_state, schedule, mirror=mirror)
-    return z_rms, mzz, x_exp
+    total_steps = ramp_steps + hold_steps
+    times, z_rms, mzz, x_exp = _propagate(N, total_steps, dt, initial_state, schedule, mirror=mirror)
+    return times, z_rms, mzz, x_exp
 
 
 def run_trotter_fixed_hamiltonian(N, h, J, dt, steps, initial_state_label=None, mirror=True):

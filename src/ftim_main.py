@@ -30,6 +30,7 @@ def main():
     trotter_data = run_adiabatic_simulation(
         config.N, config.J, config.H_VALUES,
         config.ADIABATIC_DT, config.ADIABATIC_RATE_REF, h_init=config.H_INIT,
+        hold_steps=config.ADIABATIC_HOLD_STEPS,
     )
     print_comparison_table(
         ed_results, trotter_data,

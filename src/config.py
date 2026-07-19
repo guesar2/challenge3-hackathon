@@ -17,6 +17,8 @@ H_INIT = 4.0                # starting transverse field for adiabatic sweeps (de
 # Adiabatic sweep
 ADIABATIC_DT = 0.02
 ADIABATIC_RATE_REF = 0.022   # target |dh/dt|, sets sweep duration per h_target
+ADIABATIC_HOLD_STEPS = 0   # extra steps at fixed (h_target, J) after the ramp,
+                             # to check the state has actually settled (see plot_adiabatic_convergence)
 
 # Fixed-Hamiltonian time evolution (quench dynamics from a product state)
 QUENCH_DT = 0.05

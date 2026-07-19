@@ -51,10 +51,14 @@ def plot_adiabatic_convergence(h_values, trotter_data, ed_results, rate_ref, sav
         for h in h_values:
             t = trotter_data[h]['time']
             ax.plot(t, trotter_data[h][data_key], 'o-', markersize=3, label=f'Target h/J = {h:.1f}')
+            color = ax.lines[-1].get_color()
             ed_val = next(r[ed_key] for r in ed_results if r['h'] == h)
-            ax.axhline(y=ed_val, color=ax.lines[-1].get_color(), linestyle='--',
+            ax.axhline(y=ed_val, color=color, linestyle='--',
                        alpha=0.6, label=f'{ed_label} = {ed_val:.3f}')
-        ax.set_xlabel('Adiabatic Sweep Time t')
+            ramp_end = trotter_data[h].get('ramp_end_time')
+            if ramp_end is not None and ramp_end < t[-1]:
+                ax.axvline(x=ramp_end, color=color, linestyle=':', alpha=0.4)
+        ax.set_xlabel('Adiabatic Sweep Time t (dotted vline = end of ramp, hold follows)')
         ax.set_ylabel(ylabel)
         ax.set_title(title)
         ax.grid(True, alpha=0.3)
