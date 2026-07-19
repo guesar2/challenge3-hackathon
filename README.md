@@ -35,14 +35,23 @@ Codificación fermiónica (Jordan-Wigner / Bravyi-Kitaev) para redes pequeñas (
 quantathon-challenge3/
 ├── README.md                          ← Este archivo
 ├── requirements.txt                   ← Dependencias
-├── main.py                            ← Punto de entrada único
+├── main.py                            ← OBSOLETO — ver nota abajo
 │
 ├── src/
-│   ├── tfim_hamiltonian.py            ← Construcción del Hamiltoniano TFIM
-│   ├── exact_diagonalization.py       ← Diagonalización exacta con SciPy
-│   ├── trotter_circuit.py             ← Circuitos de Trotter (Qiskit / Guppy)
-│   ├── observables.py                 ← Cálculo de ⟨Z⟩, ⟨X⟩, ⟨ZᵢZⱼ⟩
-│   └── fermi_hubbard.py               ← Extensión opcional (mapeo J-W, B-K)
+│   ├── ftim_main.py                   ← Punto de entrada real (orquestación de las 3 etapas)
+│   ├── config.py                      ← Parámetros de simulación (N, J, H_VALUES, dt, etc.)
+│   ├── pauli_ops.py                   ← Operadores de Pauli + construcción del Hamiltoniano TFIM
+│   ├── exact_diagonalization.py       ← Línea base ED (estado fundamental y evolución exacta)
+│   ├── circuits.py                    ← Circuitos de Trotter (Qiskit, edge coloring, capa simétrica)
+│   ├── trotter_simulation.py          ← Propagación del statevector (barrido adiabático y quench)
+│   ├── sweep_schedule.py              ← Lógica de número de pasos para el barrido adiabático
+│   ├── plotting.py / ed_figures.py    ← Generación de figuras (matplotlib)
+│   ├── reporting.py                   ← Tabla comparativa Trotter vs. ED en consola
+│   ├── figures/                       ← Figuras generadas por defecto
+│   └── trotter_circuit.py, observables.py,
+│       tfim_hamiltonian.py, fermi_hubbard.py
+│                                       ← Placeholders vacíos (0 bytes), refactorizados hacia
+│                                         los módulos de arriba; no importar desde aquí
 │
 ├── notebooks/
 │   ├── 01_exact_diagonalization.ipynb ← Línea base clásica
@@ -51,8 +60,8 @@ quantathon-challenge3/
 │   └── 04_optional_fermi_hubbard.ipynb ← Extensión Fermi-Hubbard 2D
 │
 ├── tests/
-│   ├── test_hamiltonian.py            ← Tests unitarios del Hamiltoniano
-│   └── test_trotter.py               ← Tests de convergencia Trotter
+│   ├── test_hamiltonian.py            ← Vacío — pendiente (ver Tests)
+│   └── test_trotter.py               ← Vacío — pendiente (ver Tests)
 │
 ├── data/                              ← Resultados numéricos (.npz, .json)
 ├── figures/                           ← Figuras generadas (.png, .pdf)
@@ -60,7 +69,14 @@ quantathon-challenge3/
 └── docs/
     ├── TECHNICAL_REPORT.md            ← Borrador del informe técnico (máx. 8 pp.)
     ├── PRESENTATION.md                ← Guión de la presentación (5 min)
-    └── SDK_REFLECTION.md              ← Reflexión sobre SDK (≤200 palabras)
+    ├── SDK_REFLECTION.md              ← Reflexión sobre SDK (≤200 palabras)
+    ├── PLAN.md                        ← Plan de trabajo del hackathon
+    └── CHECKLIST.md                   ← Checklist de entregables
+
+> **Nota sobre `main.py`:** está obsoleto. Importa módulos (`trotter_circuit`,
+> `observables`) que fueron refactorizados hacia los módulos de `src/` listados
+> arriba, y su `CONFIG` ya no coincide con las APIs actuales. El punto de
+> entrada real y funcional es `src/ftim_main.py`.
 ```
 
 ---
@@ -94,18 +110,20 @@ pip install -r requirements.txt
 
 ## Uso
 
-### Ejecución completa (punto de entrada único)
+### Ejecución completa (punto de entrada real)
 
 ```bash
-python main.py
+source venv/bin/activate
+python src/ftim_main.py         # ejecutar desde src/, o con src/ en sys.path
 ```
 
-Este script reproduce **todas las figuras y cifras reportadas** en el informe técnico:
-1. Diagonalización exacta para N = {4, 6, 8} y h/J ∈ {0.5, 1.0, 2.0}
-2. Simulación trotterizada con pasos Δt = {0.1, 0.05, 0.025}
-3. Gráficos de magnetización ⟨Z⟩, ⟨X⟩ vs. tiempo
-4. Barrido de h/J y detección de la transición de fase
-5. Comparación cuántico vs. clásico con barras de error
+> **No usar `python main.py`** en la raíz del repo — está obsoleto (ver nota
+> en la sección anterior).
+
+Este script orquesta las tres etapas del pipeline, con parámetros centralizados en `src/config.py`:
+1. `ed_baseline` — observables del estado fundamental (ED) para `config.H_VALUES`
+2. `run_adiabatic_simulation` — barrido adiabático trotterizado desde `config.H_INIT` hasta cada `h` objetivo, comparado contra ED
+3. Evolución "quench" desde el estado producto `|0...0⟩`, comparando `ed_time_evolution_exact` vs. `run_trotter_fixed_hamiltonian` (objetivo: <5% de desviación en ⟨Z⟩ y ⟨ZᵢZᵢ₊₁⟩)
 
 ### Ejecución por notebooks (desarrollo interactivo)
 
@@ -204,7 +222,9 @@ jupyter notebook notebooks/
 pytest tests/ -v
 ```
 
-Tests incluidos:
+> **Estado actual:** `tests/test_hamiltonian.py` y `tests/test_trotter.py`
+> están vacíos (0 bytes), por lo que `pytest tests/` recolecta 0 tests. Los
+> tests descritos abajo son los que faltan implementar:
 - Hermiticidad del Hamiltoniano TFIM
 - Conservación de la norma en evolución trotterizada
 - Convergencia de Trotter al reducir Δt
