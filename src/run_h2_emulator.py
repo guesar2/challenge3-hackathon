@@ -20,6 +20,7 @@ back from the hardware.
 import config
 from exact_diagonalization import ed_time_evolution_exact
 from persistence import save_stage_results, load_latest
+from plotting import plot_h2_vs_ed
 
 
 def run():
@@ -32,7 +33,7 @@ def run():
               "jobs to qnexus -- this consumes a metered usage quota.")
         return None
 
-    from qnexus_backend import submit_quench_job, bitstrings_to_observables
+    from qnexus_backend import submit_quench_job, bitstrings_to_observables, assemble_h2_vs_ed
 
     raw_by_h = {}
     results = {}
@@ -72,6 +73,14 @@ def run():
         }
 
     save_stage_results("h2_emulator", results)
+
+    plot_data = assemble_h2_vs_ed(results, raw_by_h)
+    plot_h2_vs_ed(
+        plot_data["h_values"], plot_data["z_h2"], plot_data["z_err"],
+        plot_data["mzz_h2"], plot_data["mzz_err"], plot_data["z_ed"], plot_data["mzz_ed"],
+        save_dir=config.PLOT_SAVE_DIR,
+    )
+
     return results
 
 

@@ -144,3 +144,43 @@ def plot_fixed_hamiltonian_evolution(h_values, evolution_results, ed_results, sa
 
     _finalize(fig, 'fixed_hamiltonian_evolution.png', save_dir)
     return fig
+
+
+def plot_h2_vs_ed(h_values, z_h2, z_err, mzz_h2, mzz_err, z_ed, mzz_ed,
+                   save_dir=None, saved_at=None):
+    """Quantinuum H2 emulator run vs. the ED ground state, per target h/J.
+
+    z_err/mzz_err are shot-noise standard errors (bootstrap over the raw
+    measured shots -- see qnexus_backend.bootstrap_observable_errors),
+    shown as error bars so the hardware numbers aren't reported without a
+    noise estimate alongside them.
+    """
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(11, 4.5))
+
+    ax1.errorbar(h_values, z_h2, yerr=z_err, fmt='bo', markersize=8, capsize=4,
+                 label='H2 emulator')
+    ax1.plot(h_values, z_ed, 'rs--', markersize=8, label='ED (ground state)')
+    ax1.axvline(x=1.0, color='gray', linestyle=':', alpha=0.7, label='Critical h/J=1')
+    ax1.set_xlabel('h / J')
+    ax1.set_ylabel(r'$\langle Z \rangle$ (RMS per site)')
+    ax1.set_title('Quantinuum H2 vs. ED — <Z>')
+    ax1.grid(True, alpha=0.3)
+    ax1.legend()
+
+    ax2.errorbar(h_values, mzz_h2, yerr=mzz_err, fmt='bo', markersize=8, capsize=4,
+                 label='H2 emulator')
+    ax2.plot(h_values, mzz_ed, 'rs--', markersize=8, label='ED (ground state)')
+    ax2.axvline(x=1.0, color='gray', linestyle=':', alpha=0.7, label='Critical h/J=1')
+    ax2.set_xlabel('h / J')
+    ax2.set_ylabel(r'$\langle Z_i Z_{i+1} \rangle$')
+    ax2.set_title('Quantinuum H2 vs. ED — <Zi Zi+1>')
+    ax2.grid(True, alpha=0.3)
+    ax2.legend()
+
+    title = 'Quantinuum H2 Emulator Quench vs. Exact Diagonalization (error bars: shot noise)'
+    if saved_at:
+        title += f'\nrun: {saved_at}'
+    fig.suptitle(title, fontsize=10)
+
+    _finalize(fig, 'h2_vs_ed.png', save_dir)
+    return fig
