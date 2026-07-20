@@ -42,18 +42,22 @@ quantathon-challenge3/
 │   ├── run_ed.py                      ← Sección 1/4 — línea base ED, ejecutable de forma independiente
 │   ├── run_adiabatic.py               ← Sección 2/4 — barrido adiabático trotterizado (statevector local)
 │   ├── run_quench.py                  ← Sección 3/4 — evolución "quench" ED vs. Trotter local
-│   ├── run_h2_emulator.py             ← Sección 4/4 — envío del circuito al emulador Quantinuum H2 vía qnexus
-│   │                                     (no-op salvo que config.RUN_ON_H2_EMULATOR = True — consume cuota)
-│   ├── config.py                      ← Parámetros de simulación (N, J, H_VALUES, dt, H2_*, etc.)
+│   ├── run_h2_emulator.py             ← Sección 4/4 — quench, barrido adiabático y VQE contra el emulador Quantinuum H2 vía qnexus
+│   │                                     (no-op salvo que config.RUN_ON_H2_EMULATOR = True — consume cuota;
+│   │                                      actualmente en True en config.py, ver nota más abajo)
+│   ├── config.py                      ← Parámetros de simulación (N, J, H_VALUES, dt, H2_*, H2_ADIABATIC_*, H2_VQE_*, etc.)
 │   ├── pauli_ops.py                   ← Operadores de Pauli + construcción del Hamiltoniano TFIM
 │   ├── exact_diagonalization.py       ← Línea base ED (estado fundamental y evolución exacta)
 │   ├── circuits.py                    ← Circuitos de Trotter para el simulador local (Qiskit, edge coloring, capa simétrica)
-│   ├── tket_circuit.py                ← Circuito de Trotter para hardware (pytket, gate ZZPhase nativo)
-│   ├── qnexus_backend.py              ← Envío/ejecución del circuito pytket en Quantinuum vía qnexus
+│   ├── tket_circuit.py                ← Circuitos para hardware (pytket): quench (ZZPhase), barrido adiabático y ansatz HEA para VQE
+│   ├── qnexus_backend.py              ← Envío/ejecución de circuitos pytket en Quantinuum vía qnexus (quench, adiabático, batch VQE)
+│   ├── vqe.py                         ← Búsqueda del estado fundamental por VQE (ansatz hardware-efficient + COBYLA) contra el emulador H2
 │   ├── trotter_simulation.py          ← Propagación del statevector (barrido adiabático y quench)
 │   ├── sweep_schedule.py              ← Lógica de número de pasos para el barrido adiabático
-│   ├── plotting.py / ed_figures.py    ← Generación de figuras (matplotlib)
+│   ├── plotting.py / ed_figures.py    ← Generación de figuras (matplotlib), incluye las variantes H2/VQE
+│   ├── plot_h2_comparison.py          ← Script auxiliar para regenerar gráficos H2 vs. ED a partir de datos ya guardados en data/
 │   ├── reporting.py                   ← Tabla comparativa Trotter vs. ED en consola
+│   ├── persistence.py                 ← Guardado/carga de resultados por etapa en data/ (JSON con timestamp + puntero *_latest.json)
 │   ├── figures/                       ← Figuras generadas por defecto al ejecutar desde src/
 │   └── trotter_circuit.py, observables.py,
 │       tfim_hamiltonian.py, fermi_hubbard.py
@@ -107,11 +111,14 @@ venv\Scripts\activate        # Windows
 pip install -r requirements.txt
 ```
 
-> **Nota sobre el emulador H2:** `qnexus` y `pytket` (usados por `run_h2_emulator.py`)
-> ya están en `requirements.txt`. Ese script requiere además una sesión de
-> `qnexus` iniciada (login contra Quantinuum Nexus) y **consume una cuota de
-> uso medida** — está desactivado por defecto (`config.RUN_ON_H2_EMULATOR =
-> False`); el resto del pipeline no lo necesita.
+> **Nota sobre el emulador H2:** `qnexus` y `pytket` (usados por `run_h2_emulator.py`
+> y `vqe.py`) ya están en `requirements.txt`. Ese script requiere además una
+> sesión de `qnexus` iniciada (login contra Quantinuum Nexus) y **consume una
+> cuota de uso medida** — está pensado para permanecer desactivado por defecto
+> (`config.RUN_ON_H2_EMULATOR = False`); el resto del pipeline no lo necesita.
+> ⚠️ En este repo `config.py` actualmente tiene `RUN_ON_H2_EMULATOR = True` —
+> revisa y ajusta ese valor antes de correr `main.py` / `python
+> src/run_h2_emulator.py` si no querés consumir cuota.
 
 ---
 
@@ -130,7 +137,7 @@ Este script orquesta las cuatro secciones del pipeline en secuencia, con paráme
 1. `run_ed.py` — `ed_baseline`: observables del estado fundamental (ED) para `config.H_VALUES`
 2. `run_adiabatic.py` — `run_adiabatic_simulation`: barrido adiabático trotterizado (statevector local, Qiskit) desde `config.H_INIT` hasta cada `h` objetivo, comparado contra ED
 3. `run_quench.py` — evolución "quench" desde el estado producto `|0...0⟩`, comparando `ed_time_evolution_exact` vs. `run_trotter_fixed_hamiltonian` (objetivo: <5% de desviación en ⟨Z⟩ y ⟨ZᵢZᵢ₊₁⟩)
-4. `run_h2_emulator.py` — el mismo circuito de quench, construido en pytket, enviado al emulador Quantinuum H2 vía `qnexus` — **desactivado por defecto**; solo corre si `config.RUN_ON_H2_EMULATOR = True`
+4. `run_h2_emulator.py` — el mismo circuito de quench, construido en pytket, enviado al emulador Quantinuum H2 vía `qnexus` — pensado para estar **desactivado por defecto**; solo corre si `config.RUN_ON_H2_EMULATOR = True` (ver nota de cuota arriba)
 
 ### Ejecución de una sola sección
 
@@ -140,8 +147,32 @@ Cada sección es independiente — calcula su propia línea base ED y no depende
 python src/run_ed.py            # solo línea base ED (rápido, puramente clásico)
 python src/run_adiabatic.py     # solo el barrido adiabático
 python src/run_quench.py        # solo la evolución "quench"
-python src/run_h2_emulator.py   # no-op salvo que config.RUN_ON_H2_EMULATOR = True
+python src/run_h2_emulator.py   # requiere config.RUN_ON_H2_EMULATOR = True — consume cuota
 ```
+
+### Funciones adicionales del emulador H2 (fuera de `main.py`)
+
+`run_h2_emulator.py` expone tres entradas independientes, todas gateadas por
+`config.RUN_ON_H2_EMULATOR` y cada una con su propio costo de cuota — solo
+`run()` (quench) corre desde `main.py`/`ftim_main.py`; las otras dos se
+invocan explícitamente:
+
+```bash
+python src/run_h2_emulator.py                      # run(): quench vs. tiempo (figures/h2_vs_ed_time.png)
+python src/run_h2_emulator.py --phase-transition    # run_phase_transition(): barrido adiabático en hardware (figures/h2_phase_transition.png)
+python src/run_h2_emulator.py --vqe                 # run_vqe(): VQE (ansatz hardware-efficient + COBYLA) por cada h/J
+                                                     #   (figures/vqe_convergence.png, figures/h2_phase_transition_vqe.png)
+```
+
+`run_vqe()` (en `src/vqe.py`) busca el estado fundamental directamente vía
+optimización COBYLA sobre un ansatz hardware-efficient de `6·N` parámetros,
+agrupando las mediciones del Hamiltoniano TFIM en 2 circuitos (base Z para
+ZZ, base X para X) mediante `pytket.partition.measurement_reduction` y
+enviando ambos en un mismo batch por iteración — evita el problema de
+transiciones diabáticas cerca de `h/J=1` que sí afecta a
+`run_phase_transition()` (rampa adiabática de longitud fija en hardware).
+`load_last_run()` recupera los últimos resultados guardados (quench,
+adiabático y VQE, crudos y procesados) sin gastar cuota.
 
 ### Ejecución por notebooks (desarrollo interactivo)
 
