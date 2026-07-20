@@ -244,11 +244,12 @@ def run_phase_transition(local=False):
 
 
 def run_vqe(local=False):
-    """VQE ground-state search on H2: a hardware-efficient ansatz optimized
-    via gradient-free COBYLA (see vqe.run_vqe_h2), one independent
-    optimization per h/J target -- finds the ground state directly rather
-    than following a time-dependent path, so it isn't subject to
-    run_phase_transition()'s diabatic-transition problem near h/J=1.
+    """VQE ground-state search on H2: config.H2_VQE_ANSATZ (default "hva",
+    the Hamiltonian Variational Ansatz) optimized via gradient-free COBYLA
+    (see vqe.run_vqe_h2), one independent optimization per h/J target --
+    finds the ground state directly rather than following a time-dependent
+    path, so it isn't subject to run_phase_transition()'s diabatic-
+    transition problem near h/J=1.
 
     Not called from run() or from ftim_main.py -- invoke explicitly (e.g.
     `python run_h2_emulator.py --vqe`) since it's a separate, additional
@@ -296,6 +297,7 @@ def run_vqe(local=False):
             max_iters, config.H2_VQE_TOL, config.H2_VQE_SEED,
             device_name=config.H2_DEVICE_NAME, project_name=config.H2_PROJECT_NAME,
             submit_fn=submit_vqe_batch_job, raw_stage=raw_stage,
+            ansatz=config.H2_VQE_ANSATZ, p=config.H2_VQE_P,
         )
 
         ed_energy = next(r['energy'] for r in ed_results if r['h'] == h) * config.H2_VQE_N

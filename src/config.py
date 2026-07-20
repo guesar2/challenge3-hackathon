@@ -73,26 +73,42 @@ H2_ADIABATIC_SHOTS = 2000    # bumped from 500 -- bootstrap SE at 500 shots was 
                              # <Zi Zi+1> read 4% one run, 12% the next, same config) --
                              # SE ~ 1/sqrt(shots), so 4x shots ~ 2x smaller error bars
 
-# H2 VQE ground-state search (hardware-efficient ansatz + COBYLA, following
+# H2 VQE ground-state search (COBYLA over a variational ansatz, following
 # Quantinuum's own batched-variational-experiment pattern). Independent of
 # the adiabatic/quench pipelines above -- finds the ground state directly
 # per h target instead of following a time-dependent path, so it isn't
 # subject to the adiabatic ramp's diabatic-transition problem near h/J=1.
 H2_VQE_N = 6                 # reuses the N used for H2_ADIABATIC_N
+
+# ansatz="hva" (Hamiltonian Variational Ansatz, build_hva_ansatz_circuit):
+# p layers of (ZZPhase, Rx) mirroring the TFIM's own term structure -- only
+# 2*p parameters vs. the alternative "hea" (hardware-efficient ansatz,
+# build_hea_ansatz_circuit)'s problem-agnostic 6*N. Noiseless-statevector
+# test (scipy COBYLA, no shot noise) hit the *exact* ED ground energy at
+# h/J=0.5/1.0/2.0 with p=4 (8 params), where the 36-param HEA only reached
+# ~2-3% of ED even given ~500 evaluations -- and against the real (noisy,
+# shot-sampled) local emulator, HVA's COBYLA self-terminates
+# (trust-region radius hits its lower bound) in ~36-46 evaluations, vs.
+# needing hundreds for the HEA to get anywhere close. Set ansatz="hea" and
+# see vqe.run_vqe_h2's docstring to switch back.
+H2_VQE_ANSATZ = "hva"
+H2_VQE_P = 4                 # HVA layers -- ignored when H2_VQE_ANSATZ="hea"
+
 H2_VQE_SHOTS = 200
 H2_VQE_MAX_ITERS = 15        # COBYLA iterations -- ~15 real batch round-trips per h/J
                              # (kept small: this is what actually submits to real
-                             # H2-1LE via qnexus and costs quota)
+                             # H2-1LE via qnexus and costs quota). NOTE: HVA's
+                             # measured ~36-46 evaluations to self-converge means
+                             # 15 is *below* what it needs -- a real qnexus run at
+                             # this setting will still hit the iteration cap before
+                             # converging. Bump this deliberately (and accept the
+                             # added quota cost) before an actual qnexus submission.
 H2_VQE_TOL = 1e-2            # matches Quantinuum's reference tol
 H2_VQE_SEED = 10             # matches the reference snippet's random.seed(a=10)
 
-# Local-only VQE budget (local_emulator_backend, no quota cost) -- COBYLA on a
-# 6*N=36-parameter HEA needs on the order of 500 evaluations to converge even
-# with exact (noiseless) expectation values, and 200-shot noise alone costs
-# another ~2-4x in converged energy accuracy on top of that (measured: 200
-# shots -> 36% gap from ED, 1000 -> 22%, 4000 -> 11%, at 500 iters each) --
-# so both shots and iters need to go up together for a local run to actually
-# reach the ansatz's true reach (~2-3% gap noiseless). H2_VQE_MAX_ITERS above
-# stays small on purpose since qnexus submissions cost real quota.
+# Local-only VQE budget (local_emulator_backend, no quota cost). Generous on
+# purpose -- COBYLA self-terminates once converged regardless of this cap
+# (measured ~36-46 evals for HVA, ~500 for the HEA fallback), so a high
+# ceiling costs nothing but a little wasted time if never reached.
 H2_VQE_SHOTS_LOCAL = 4000
 H2_VQE_MAX_ITERS_LOCAL = 500
