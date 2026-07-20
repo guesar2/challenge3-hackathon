@@ -36,3 +36,24 @@ H2_H_VALUES = (0.5, 1.0, 2.0)         # single point at criticality by default
 H2_STEPS = 5                 # deliberately shallow (few Trotter steps -> lower cost)
 H2_DT = 0.1
 H2_SHOTS = 200
+
+# H2 adiabatic sweep (phase-transition signal on hardware). Independent of
+# the quench pipeline above -- uses a fixed, modest ramp length regardless
+# of h_target (unlike sweep_schedule.steps_for_target's rate-based scaling,
+# which would need thousands of steps and is infeasible for a single
+# qnexus job).
+H2_ADIABATIC_N = 6           # matches the N required for the quantum-vs-ED comparison
+H2_ADIABATIC_STEPS = 15      # fixed ramp length for every h target
+H2_ADIABATIC_DT = 0.1
+H2_ADIABATIC_SHOTS = 200
+
+# H2 VQE ground-state search (hardware-efficient ansatz + COBYLA, following
+# Quantinuum's own batched-variational-experiment pattern). Independent of
+# the adiabatic/quench pipelines above -- finds the ground state directly
+# per h target instead of following a time-dependent path, so it isn't
+# subject to the adiabatic ramp's diabatic-transition problem near h/J=1.
+H2_VQE_N = 6                 # reuses the N used for H2_ADIABATIC_N
+H2_VQE_SHOTS = 200
+H2_VQE_MAX_ITERS = 15        # COBYLA iterations -- ~15 real batch round-trips per h/J
+H2_VQE_TOL = 1e-2            # matches Quantinuum's reference tol
+H2_VQE_SEED = 10             # matches the reference snippet's random.seed(a=10)

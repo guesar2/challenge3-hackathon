@@ -14,7 +14,7 @@ import numpy as np
 import qnexus as qnx
 
 from circuits import build_chain_color_edges
-from tket_circuit import build_quench_circuit
+from tket_circuit import build_quench_circuit, build_adiabatic_circuit
 
 
 def get_project(project_name: str):
@@ -90,6 +90,123 @@ def submit_quench_job(N, h_field, J, dt, steps, n_shots, device_name="H2-1LE",
         "n_shots": n_shots, "mirror": mirror,
         "initial_state_label": initial_state_label or ("0" * N),
     }
+
+
+def submit_adiabatic_job(N, h_target, J, ramp_steps, dt, n_shots, h_init, device_name="H2-1LE",
+                          mirror=True, project_name="ftim-hackathon", job_name=None):
+    """Build, upload, and run one adiabatic-ramp Trotter circuit (h_init ->
+    h_target, J: 0 -> J, starting from |+...+>) on a Quantinuum-hosted
+    backend. Blocks until results are returned.
+
+    Structured identically to submit_quench_job (upload -> compile ->
+    execute), just built from build_adiabatic_circuit instead of
+    build_quench_circuit -- see that function's docstring for why the
+    compile step is required (H2's native gateset needs Rx/ZZPhase rebased
+    to Rz/PhasedX/ZZPhase/...).
+
+    Costs against the qnexus usage quota -- call only with explicit approval.
+    """
+    color_edges = build_chain_color_edges(N)
+    circuit = build_adiabatic_circuit(
+        N, color_edges, ramp_steps, dt, h_target, J, h_init, mirror=mirror,
+    )
+
+    project = get_project(project_name)
+    job_name = job_name or f"tfim-adiabatic-N{N}-h{h_target:.2f}-steps{ramp_steps}"
+
+    circuit_ref = qnx.circuits.upload(
+        circuit=circuit,
+        name=job_name,
+        project=project,
+        description=(f"TFIM adiabatic ramp: N={N}, h_init={h_init}, h_target/J={h_target / J:.2f}, "
+                      f"dt={dt}, ramp_steps={ramp_steps}, mirror={mirror}"),
+    )
+
+    backend_config = qnx.QuantinuumConfig(device_name=device_name)
+    compiled_refs = qnx.compile(
+        programs=[circuit_ref],
+        backend_config=backend_config,
+        name=f"{job_name}-compile",
+        project=project,
+    )
+    compiled_ref = compiled_refs[0]
+
+    results = qnx.execute(
+        programs=[compiled_ref],
+        n_shots=[n_shots],
+        backend_config=backend_config,
+        name=job_name,
+        project=project,
+    )
+
+    shots = results[0].get_shots()
+    bitstrings = ["".join(str(bit) for bit in shot) for shot in shots]
+
+    return {
+        "bitstrings": bitstrings,
+        "circuit_ref_id": str(circuit_ref.id),
+        "compiled_circuit_ref_id": str(compiled_ref.id),
+        "job_name": job_name,
+        "project_name": project_name,
+        "device_name": device_name,
+        "N": N, "h_target": h_target, "J": J, "dt": dt, "ramp_steps": ramp_steps,
+        "h_init": h_init, "n_shots": n_shots, "mirror": mirror,
+    }
+
+
+def submit_vqe_batch_job(circuits, n_shots, device_name="H2-1LE",
+                          project_name="ftim-hackathon", job_name=None):
+    """Upload, compile, and execute a batch of circuits (one VQE
+    iteration's worth of measurement-basis circuits) in a single compile
+    job and a single execute job, rather than one round trip per circuit.
+
+    This is the Nexus-layer equivalent of the batching pattern in
+    Quantinuum's variational-experiment reference (start_batch/add_to_batch
+    on a raw pytket-quantinuum Backend): qnx.compile()/qnx.execute() both
+    natively accept lists of circuit refs / shot counts, so submitting the
+    whole batch as one call amortizes the per-job overhead across all of an
+    iteration's measurement circuits.
+
+    circuits: list of pytket Circuits (already measured -- e.g. one
+    Z-basis and one X-basis circuit for the TFIM's two commuting
+    measurement groups).
+
+    Returns a list of bitstring-lists, one per input circuit, in the same
+    order as `circuits`.
+    """
+    project = get_project(project_name)
+    job_name = job_name or "tfim-vqe-batch"
+
+    circuit_refs = [
+        qnx.circuits.upload(
+            circuit=circ,
+            name=f"{job_name}-{i}",
+            project=project,
+            description=f"VQE batch circuit {i}/{len(circuits)}",
+        )
+        for i, circ in enumerate(circuits)
+    ]
+
+    backend_config = qnx.QuantinuumConfig(device_name=device_name)
+    compiled_refs = qnx.compile(
+        programs=circuit_refs,
+        backend_config=backend_config,
+        name=f"{job_name}-compile",
+        project=project,
+    )
+
+    results = qnx.execute(
+        programs=list(compiled_refs),
+        n_shots=[n_shots] * len(compiled_refs),
+        backend_config=backend_config,
+        name=job_name,
+        project=project,
+    )
+
+    return [
+        ["".join(str(bit) for bit in shot) for shot in r.get_shots()]
+        for r in results
+    ]
 
 
 def _observables_from_shots(shots, N):

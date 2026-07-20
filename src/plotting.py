@@ -189,3 +189,95 @@ def plot_h2_vs_ed_time(h_values, time_series_data, save_dir=None, saved_at=None)
 
     _finalize(fig, 'h2_vs_ed_time.png', save_dir)
     return fig
+
+
+def plot_h2_phase_transition(h_values, h2_data, ed_results, save_dir=None, saved_at=None,
+                              method_label="adiabatic", filename="h2_phase_transition.png"):
+    """<Z> and <Zi Zi+1> vs. h/J for an H2 ground-state-search protocol
+    (adiabatic ramp or VQE), vs. the ED ground state -- the phase-transition
+    signal (h/J=1 crossover) as reproduced on hardware, styled like
+    plot_phase_transition.
+
+    h2_data: dict h -> {'z_h2', 'z_err', 'mzz_h2', 'mzz_err'} (see
+    run_h2_emulator.run_phase_transition()/run_vqe()). z_err/mzz_err are
+    shot-noise standard errors (qnexus_backend.bootstrap_observable_errors).
+
+    method_label/filename let callers distinguish which protocol produced
+    the data (e.g. "VQE" vs. the default "adiabatic") without duplicating
+    this function.
+    """
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(11, 4.5))
+
+    z_h2 = [h2_data[h]['z_h2'] for h in h_values]
+    z_err = [h2_data[h]['z_err'] for h in h_values]
+    z_ed = [next(r['mz_rms'] for r in ed_results if r['h'] == h) for h in h_values]
+    mzz_h2 = [h2_data[h]['mzz_h2'] for h in h_values]
+    mzz_err = [h2_data[h]['mzz_err'] for h in h_values]
+    mzz_ed = [next(r['mzz'] for r in ed_results if r['h'] == h) for h in h_values]
+
+    ax1.errorbar(h_values, z_h2, yerr=z_err, fmt='bo', markersize=8, capsize=4,
+                 label=f'H2 emulator ({method_label})')
+    ax1.plot(h_values, z_ed, 'rs--', markersize=8, label='ED (ground state)')
+    ax1.axvline(x=1.0, color='gray', linestyle=':', alpha=0.7, label='Critical h/J=1')
+    ax1.set_xlabel('Target h / J')
+    ax1.set_ylabel(r'$\langle Z \rangle$')
+    ax1.set_title('Quantum Phase Transition (H2 Emulator) — <Z>')
+    ax1.grid(True, alpha=0.3)
+    ax1.legend()
+
+    ax2.errorbar(h_values, mzz_h2, yerr=mzz_err, fmt='bo', markersize=8, capsize=4,
+                 label=f'H2 emulator ({method_label})')
+    ax2.plot(h_values, mzz_ed, 'rs--', markersize=8, label='ED (ground state)')
+    ax2.axvline(x=1.0, color='gray', linestyle=':', alpha=0.7, label='Critical h/J=1')
+    ax2.set_xlabel('Target h / J')
+    ax2.set_ylabel(r'$\langle Z_i Z_{i+1} \rangle$')
+    ax2.set_title('Quantum Phase Transition (H2 Emulator) — <Zi Zi+1>')
+    ax2.grid(True, alpha=0.3)
+    ax2.legend()
+
+    method_title = method_label if method_label.isupper() else method_label.title()
+    title = f'Quantinuum H2 {method_title} vs. Exact Diagonalization (error bars: shot noise)'
+    if saved_at:
+        title += f'\nrun: {saved_at}'
+    fig.suptitle(title, fontsize=10)
+
+    _finalize(fig, filename, save_dir)
+    return fig
+
+
+def plot_vqe_convergence(h_values, vqe_data, ed_results, save_dir=None, saved_at=None):
+    """VQE energy vs. COBYLA iteration, one subplot per h/J target, with
+    the ED ground energy as a horizontal reference line.
+
+    vqe_data: dict h -> {'energy_history', ...} (see vqe.run_vqe_h2()).
+    ed_results ground energies are per-site (ed_baseline's 'energy' field)
+    -- multiplied by N here to match the VQE's total-energy convention
+    (vqe.build_tfim_pauli_operator is unnormalized, same as
+    pauli_ops.build_tfim_hamiltonian).
+    """
+    fig, axes = plt.subplots(1, len(h_values), figsize=(5 * len(h_values), 4.5))
+    if len(h_values) == 1:
+        axes = [axes]
+
+    for ax, h in zip(axes, h_values):
+        energy_history = vqe_data[h]['energy_history']
+        ed_energy_per_site = next(r['energy'] for r in ed_results if r['h'] == h)
+        N = len(vqe_data[h]['final_params']) // 6
+        ed_energy_total = ed_energy_per_site * N
+
+        ax.plot(range(len(energy_history)), energy_history, 'bo-', markersize=4,
+                label='VQE (H2 emulator)')
+        ax.axhline(y=ed_energy_total, color='r', linestyle='--', label='ED ground energy')
+        ax.set_xlabel('COBYLA iteration')
+        ax.set_ylabel('Energy')
+        ax.set_title(f'h/J = {h:.1f}')
+        ax.grid(True, alpha=0.3)
+        ax.legend(loc='best', fontsize=8)
+
+    title = 'VQE Convergence on Quantinuum H2 Emulator'
+    if saved_at:
+        title += f'\nrun: {saved_at}'
+    fig.suptitle(title, fontsize=10)
+
+    _finalize(fig, 'vqe_convergence.png', save_dir)
+    return fig
