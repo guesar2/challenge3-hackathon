@@ -50,6 +50,7 @@ quantathon-challenge3/
 │   ├── exact_diagonalization.py       ← Línea base ED (estado fundamental y evolución exacta)
 │   ├── circuits.py                    ← Circuitos de Trotter para el simulador local (Qiskit, edge coloring, capa simétrica)
 │   ├── tket_circuit.py                ← Circuitos para hardware (pytket): quench (ZZPhase), barrido adiabático y ansatz HEA para VQE
+│   │                                     (con fusión de puertas Rx en los bordes de capa Trotter -- ver Metodología)
 │   ├── qnexus_backend.py              ← Envío/ejecución de circuitos pytket en Quantinuum vía qnexus (quench, adiabático, batch VQE)
 │   ├── vqe.py                         ← Búsqueda del estado fundamental por VQE (ansatz hardware-efficient + COBYLA) contra el emulador H2
 │   ├── trotter_simulation.py          ← Propagación del statevector (barrido adiabático y quench)
@@ -213,6 +214,25 @@ jupyter notebook notebooks/
   ```
 - **Verificación de convergencia:** reducir Δt a la mitad y confirmar estabilidad de observables
 - **SDK:** Qiskit (simulador local `Statevector`, sin ruido) → pytket + `qnexus` (emulador Quantinuum H2)
+- **Reducción de puertas en el circuito de hardware (pytket):** en la capa
+  simetrizada `Rx(θ/2) — ZZPhase — Rx(θ/2)` (`mirror=True`), la `Rx(θ/2)`
+  final de un paso de Trotter y la `Rx(θ/2)` inicial del siguiente actúan
+  sobre el mismo qubit sin nada entremedio, así que se fusionan de forma
+  exacta vía `Rx(a)·Rx(b) = Rx(a+b)` en una sola puerta — mismo unitario,
+  sin costo de error de Trotter, solo menos puertas de un qubit (`steps+1`
+  capas de Rx en vez de `2·steps`). Implementado en
+  `tket_circuit._append_trotter_layers` y verificado numéricamente
+  (diferencia de unitarios ~1e-15) antes de aplicarlo a
+  `build_quench_circuit`/`build_adiabatic_circuit`. En el barrido adiabático
+  de N=6 usado para el emulador H2 esto redujo el conteo total de puertas
+  ~33% (p. ej. h/J=0.5 con 100 pasos: 1812 → 1218 puertas, profundidad 402 →
+  303) sin cambiar ninguna observable. Inspirado por la técnica de
+  "reducción de conteo de puertas mediante identidades de circuito" de la
+  Ref. [6] (arXiv:2511.02125, Fig. S8) — ahí fusionan puertas SWAP
+  fermiónicas con puertas de interacción para el hopping de Fermi-Hubbard,
+  lo cual no aplica directamente aquí (TFIM ya es a primeros vecinos, sin
+  red de SWAPs), pero la misma identidad de fusión de rotaciones adyacentes
+  de un qubit sí se traslada directamente a esta capa Trotter simetrizada.
 
 ### Fase 3: Comparación y análisis de error
 
