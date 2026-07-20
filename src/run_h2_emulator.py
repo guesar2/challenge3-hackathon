@@ -150,13 +150,17 @@ def run_phase_transition(local=False):
     the flat-100-steps baseline, the only target of the three where scaling
     down hurt rather than helped.
 
-    h/J=1 also uses a finer dt (H2_ADIABATIC_CRITICAL_DT_FACTOR * dt, with
-    steps scaled up to keep the same total ramp time) rather than just more
-    steps at the same dt: with enough shots (2000) to shrink the bootstrap
-    error bar below the deviation itself, h/J=1's <Zi Zi+1> bias turned out
-    to be statistically real (~4.7 sigma, not noise) even at 100 steps --
-    i.e. limited by Trotter step-size error, not by ramp adiabaticity, so
-    only a smaller dt (not a longer ramp at the same dt) should shrink it.
+    h/J=1 also uses H2_ADIABATIC_CRITICAL_TIME_FACTOR * H2_ADIABATIC_MAX_STEPS
+    steps at the *same* dt as every other target -- i.e. a longer total
+    ramp time, not finer Trotter resolution. A finer-dt-at-fixed-time
+    variant was tried first (since 2000 shots showed h/J=1's bias was
+    statistically real, not noise) but barely moved the deviation; a
+    local_emulator_backend test isolating time vs. resolution (free to run
+    at high shot counts) showed doubling the total ramp time at the
+    original dt fixed it (~6.5% -> ~2.15%), while doubling resolution at
+    fixed time did not -- see config.py's H2_ADIABATIC_CRITICAL_TIME_FACTOR
+    comment for the numbers. Textbook critical slowing down: the adiabatic
+    theorem needs more *time* as the gap closes, not finer time-resolution.
     """
     print("=" * 60)
     print(f"H2 ADIABATIC SWEEP (phase-transition signal, {config.H2_DEVICE_NAME}, "
@@ -180,15 +184,11 @@ def run_phase_transition(local=False):
     ed_results = ed_baseline(config.H2_ADIABATIC_N, config.H2_H_VALUES, J=config.J)
 
     h_values = list(config.H2_H_VALUES)
-    dt_by_target = [
-        config.H2_ADIABATIC_DT * config.H2_ADIABATIC_CRITICAL_DT_FACTOR if h == config.J
-        else config.H2_ADIABATIC_DT
-        for h in h_values
-    ]
+    dt_by_target = [config.H2_ADIABATIC_DT for _ in h_values]  # same dt for every target
     ramp_steps_by_target = [
-        # h/J=1: same total ramp time as H2_ADIABATIC_MAX_STEPS steps at the
-        # coarse dt, just resolved with more, finer steps.
-        round(config.H2_ADIABATIC_MAX_STEPS / config.H2_ADIABATIC_CRITICAL_DT_FACTOR) if h == config.J
+        # h/J=1: longer total ramp time (more steps at the same dt), not
+        # finer resolution -- see docstring above.
+        round(config.H2_ADIABATIC_MAX_STEPS * config.H2_ADIABATIC_CRITICAL_TIME_FACTOR) if h == config.J
         else min(
             steps_for_target(h, config.H2_ADIABATIC_DT, config.H2_ADIABATIC_RATE_REF, h_init=config.H_INIT),
             config.H2_ADIABATIC_MAX_STEPS,

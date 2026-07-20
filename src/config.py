@@ -53,13 +53,19 @@ H2_ADIABATIC_RATE_REF = 0.35  # target |dh/dt| -- anchored so the largest |Delta
                               # value that worked well (0.6-2.0% deviation) in testing
 H2_ADIABATIC_MAX_STEPS = 100  # hard cap regardless of rate_ref -- keeps circuit depth/cost
                               # bounded even if H2_H_VALUES later adds a target far from H_INIT
-H2_ADIABATIC_CRITICAL_DT_FACTOR = 0.5  # at h/J=1 (gap closes -> critical slowing down), use
-                              # dt * this factor with steps scaled up by 1/factor to keep the
-                              # same total ramp time -- finer Trotter resolution rather than a
-                              # longer ramp, since pinning h/J=1 to H2_ADIABATIC_MAX_STEPS alone
-                              # left a confirmed (~4.7 sigma) systematic bias in <Zi Zi+1> that
-                              # more shots couldn't shrink, pointing at Trotter-step-size error
-                              # rather than an insufficiently adiabatic ramp
+H2_ADIABATIC_CRITICAL_TIME_FACTOR = 2  # at h/J=1 (gap closes -> critical slowing down), use
+                              # steps = H2_ADIABATIC_MAX_STEPS * this factor at the *same* dt
+                              # -- i.e. a longer total ramp time, not finer resolution. Pinning
+                              # h/J=1 to H2_ADIABATIC_MAX_STEPS alone left a confirmed (~14-17
+                              # sigma, 20000 shots) systematic bias of ~6.5% in <Zi Zi+1>; a
+                              # local_emulator_backend test (free, 5000 shots) that separately
+                              # varied resolution (dt) and total ramp time (T = steps*dt) at
+                              # h/J=1 showed doubling dt resolution at fixed T barely moved the
+                              # bias, but doubling T at fixed (coarse) dt alone dropped it from
+                              # ~6.5% to ~2.15% -- confirming it's ramp *time*, not Trotter
+                              # step-size, that was insufficient (textbook critical slowing
+                              # down: the adiabatic theorem needs T -> large as the gap closes,
+                              # independent of how finely that time is resolved)
 H2_ADIABATIC_SHOTS = 2000    # bumped from 500 -- bootstrap SE at 500 shots was ~0.02 on
                              # observables of magnitude ~0.6-0.9, comparable in size to the
                              # 5% deviation target itself, making individual runs bounce
