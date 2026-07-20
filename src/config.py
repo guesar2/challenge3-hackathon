@@ -1,11 +1,7 @@
 """
 config.py
 
-Centralized simulation parameters. Previously these were magic numbers
-scattered through the notebook (H_INIT at module scope, dt/rate_ref/steps
-hardcoded inside __main__, etc.). Collecting them here makes it obvious
-what to change to explore different system sizes, sweep rates, or
-evolution times.
+Centralized simulation parameters. 
 """
 
 N = 6                       # number of spins in the periodic chain
@@ -28,3 +24,15 @@ QUENCH_INITIAL_STATE = None  # None -> defaults to |00...0>
 # Where to save figures. Set to None to skip saving (only meaningful if
 # your backend is interactive and plt.show() actually opens a window).
 PLOT_SAVE_DIR = "figures"
+
+# Quantinuum H2 emulator run (pytket circuit submitted via qnexus).
+# OFF by default: requires a live qnexus login and costs against a metered
+# usage quota. Flip to True only with explicit approval to spend quota.
+RUN_ON_H2_EMULATOR = True
+H2_DEVICE_NAME = "H2-1LE"    # H2 noiseless-leakage emulator (cheapest H2-family target)
+H2_PROJECT_NAME = "ftim-hackathon"
+H2_N = 4                     # small chain -- keep circuit width/cost modest
+H2_H_VALUES = (1.0,)         # single point at criticality by default
+H2_STEPS = 5                 # deliberately shallow (few Trotter steps -> lower cost)
+H2_DT = 0.1
+H2_SHOTS = 200

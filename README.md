@@ -35,19 +35,26 @@ Codificación fermiónica (Jordan-Wigner / Bravyi-Kitaev) para redes pequeñas (
 quantathon-challenge3/
 ├── README.md                          ← Este archivo
 ├── requirements.txt                   ← Dependencias
-├── main.py                            ← Punto de entrada único
+├── main.py                            ← Punto de entrada único (inserta src/ en sys.path y llama a ftim_main.main())
 │
 ├── src/
-│   ├── ftim_main.py                   ← Punto de entrada real (orquestación de las 3 etapas)
-│   ├── config.py                      ← Parámetros de simulación (N, J, H_VALUES, dt, etc.)
+│   ├── ftim_main.py                   ← Orquestador: ejecuta las 4 secciones (run_*.py) en secuencia
+│   ├── run_ed.py                      ← Sección 1/4 — línea base ED, ejecutable de forma independiente
+│   ├── run_adiabatic.py               ← Sección 2/4 — barrido adiabático trotterizado (statevector local)
+│   ├── run_quench.py                  ← Sección 3/4 — evolución "quench" ED vs. Trotter local
+│   ├── run_h2_emulator.py             ← Sección 4/4 — envío del circuito al emulador Quantinuum H2 vía qnexus
+│   │                                     (no-op salvo que config.RUN_ON_H2_EMULATOR = True — consume cuota)
+│   ├── config.py                      ← Parámetros de simulación (N, J, H_VALUES, dt, H2_*, etc.)
 │   ├── pauli_ops.py                   ← Operadores de Pauli + construcción del Hamiltoniano TFIM
 │   ├── exact_diagonalization.py       ← Línea base ED (estado fundamental y evolución exacta)
-│   ├── circuits.py                    ← Circuitos de Trotter (Qiskit, edge coloring, capa simétrica)
+│   ├── circuits.py                    ← Circuitos de Trotter para el simulador local (Qiskit, edge coloring, capa simétrica)
+│   ├── tket_circuit.py                ← Circuito de Trotter para hardware (pytket, gate ZZPhase nativo)
+│   ├── qnexus_backend.py              ← Envío/ejecución del circuito pytket en Quantinuum vía qnexus
 │   ├── trotter_simulation.py          ← Propagación del statevector (barrido adiabático y quench)
 │   ├── sweep_schedule.py              ← Lógica de número de pasos para el barrido adiabático
 │   ├── plotting.py / ed_figures.py    ← Generación de figuras (matplotlib)
 │   ├── reporting.py                   ← Tabla comparativa Trotter vs. ED en consola
-│   ├── figures/                       ← Figuras generadas por defecto
+│   ├── figures/                       ← Figuras generadas por defecto al ejecutar desde src/
 │   └── trotter_circuit.py, observables.py,
 │       tfim_hamiltonian.py, fermi_hubbard.py
 │                                       ← Placeholders vacíos (0 bytes), refactorizados hacia
@@ -63,8 +70,7 @@ quantathon-challenge3/
 │   ├── test_hamiltonian.py            ← Vacío — pendiente (ver Tests)
 │   └── test_trotter.py               ← Vacío — pendiente (ver Tests)
 │
-├── data/                              ← Resultados numéricos (.npz, .json)
-├── figures/                           ← Figuras generadas (.png, .pdf)
+├── figures/                           ← Figuras generadas al ejecutar `python main.py` desde la raíz
 │
 └── docs/
     ├── TECHNICAL_REPORT.md            ← Borrador del informe técnico (máx. 8 pp.)
@@ -101,23 +107,42 @@ venv\Scripts\activate        # Windows
 pip install -r requirements.txt
 ```
 
-> **Nota sobre Guppy:** Si se utiliza el SDK nativo de Quantinuum, instalar por separado siguiendo la documentación oficial de [Quantinuum](https://www.quantinuum.com/).
+> **Nota sobre el emulador H2:** `qnexus` y `pytket` (usados por `run_h2_emulator.py`)
+> ya están en `requirements.txt`. Ese script requiere además una sesión de
+> `qnexus` iniciada (login contra Quantinuum Nexus) y **consume una cuota de
+> uso medida** — está desactivado por defecto (`config.RUN_ON_H2_EMULATOR =
+> False`); el resto del pipeline no lo necesita.
 
 ---
 
 ## Uso
 
-### Ejecución completa (punto de entrada real)
+### Ejecución completa (punto de entrada único)
 
 ```bash
 source venv/bin/activate
+python main.py                  # desde la raíz del repo — reproduce todas las figuras/cifras
+# equivalente:
 python src/ftim_main.py         # ejecutar desde src/, o con src/ en sys.path
 ```
 
-Este script orquesta las tres etapas del pipeline, con parámetros centralizados en `src/config.py`:
-1. `ed_baseline` — observables del estado fundamental (ED) para `config.H_VALUES`
-2. `run_adiabatic_simulation` — barrido adiabático trotterizado desde `config.H_INIT` hasta cada `h` objetivo, comparado contra ED
-3. Evolución "quench" desde el estado producto `|0...0⟩`, comparando `ed_time_evolution_exact` vs. `run_trotter_fixed_hamiltonian` (objetivo: <5% de desviación en ⟨Z⟩ y ⟨ZᵢZᵢ₊₁⟩)
+Este script orquesta las cuatro secciones del pipeline en secuencia, con parámetros centralizados en `src/config.py`:
+1. `run_ed.py` — `ed_baseline`: observables del estado fundamental (ED) para `config.H_VALUES`
+2. `run_adiabatic.py` — `run_adiabatic_simulation`: barrido adiabático trotterizado (statevector local, Qiskit) desde `config.H_INIT` hasta cada `h` objetivo, comparado contra ED
+3. `run_quench.py` — evolución "quench" desde el estado producto `|0...0⟩`, comparando `ed_time_evolution_exact` vs. `run_trotter_fixed_hamiltonian` (objetivo: <5% de desviación en ⟨Z⟩ y ⟨ZᵢZᵢ₊₁⟩)
+4. `run_h2_emulator.py` — el mismo circuito de quench, construido en pytket, enviado al emulador Quantinuum H2 vía `qnexus` — **desactivado por defecto**; solo corre si `config.RUN_ON_H2_EMULATOR = True`
+
+### Ejecución de una sola sección
+
+Cada sección es independiente — calcula su propia línea base ED y no depende de que las demás se hayan ejecutado antes — así que se puede verificar una sin correr el resto:
+
+```bash
+cd src
+python run_ed.py            # solo línea base ED (rápido, puramente clásico)
+python run_adiabatic.py     # solo el barrido adiabático
+python run_quench.py        # solo la evolución "quench"
+python run_h2_emulator.py   # no-op salvo que config.RUN_ON_H2_EMULATOR = True
+```
 
 ### Ejecución por notebooks (desarrollo interactivo)
 
@@ -157,7 +182,7 @@ jupyter notebook notebooks/
   e^(-iHt) ≈ [e^(-iH_X Δt/2) · e^(-iH_ZZ Δt) · e^(-iH_X Δt/2)]^(t/Δt)
   ```
 - **Verificación de convergencia:** reducir Δt a la mitad y confirmar estabilidad de observables
-- **SDK:** Qiskit (simulador local sin ruido) → Guppy (emulador H2)
+- **SDK:** Qiskit (simulador local `Statevector`, sin ruido) → pytket + `qnexus` (emulador Quantinuum H2)
 
 ### Fase 3: Comparación y análisis de error
 
@@ -171,19 +196,41 @@ jupyter notebook notebooks/
 
 ### Figuras principales
 
-| Figura | Descripción | Archivo |
-|--------|-------------|---------|
-| Fig. 1 | Magnetización ⟨Z⟩ vs. h/J para N = {4, 6, 8} (ED) | `figures/fig1_magnetization_ed.png` |
-| Fig. 2 | Evolución temporal ⟨Z(t)⟩: Trotter vs. ED para h/J = 1.0 | `figures/fig2_time_evolution.png` |
-| Fig. 3 | Error relativo Trotter vs. Δt (convergencia) | `figures/fig3_trotter_convergence.png` |
-| Fig. 4 | Correlaciones ⟨ZᵢZⱼ⟩ vs. distancia para h/J ∈ {0.5, 1.0, 2.0} | `figures/fig4_correlations.png` |
-| Fig. 5 | (Opcional) Fermi-Hubbard: doble ocupación vs. U/t | `figures/fig5_fermi_hubbard.png` |
+Generadas por `python main.py` (o por `run_adiabatic.py` / `run_quench.py`
+individualmente) en `figures/` (o `src/figures/` si se ejecuta directamente
+desde `src/`):
+
+| Figura | Descripción | Generada por | Archivo |
+|--------|-------------|---------------|---------|
+| Convergencia adiabática | ⟨Z⟩, ⟨ZᵢZᵢ₊₁⟩, ⟨X⟩ vs. tiempo de barrido para cada `h` objetivo, con línea de referencia ED y marca del fin de la rampa | `run_adiabatic.py` | `figures/adiabatic_convergence.png` |
+| Transición de fase | ⟨Z⟩, ⟨X⟩, ⟨ZᵢZᵢ₊₁⟩ finales vs. h/J objetivo — Trotter vs. ED, con la línea crítica h/J=1 | `run_adiabatic.py` | `figures/phase_transition.png` |
+| Evolución "quench" | ⟨Z⟩ y ⟨ZᵢZᵢ₊₁⟩ vs. tiempo, ED vs. Trotter local, para cada `h` en `config.H_VALUES` | `run_quench.py` | `figures/fixed_hamiltonian_evolution.png` |
+
+`src/ed_figures.py` contiene generación de figuras adicional (magnetización
+multi-N, convergencia de Trotter vs. Δt, correlaciones vs. distancia) pero
+actualmente **no está conectada al pipeline** (`run_*.py` no la invoca) —
+está disponible para extender el análisis pero no forma parte de la
+ejecución por defecto.
 
 ### Datos de salida
 
-- `data/ed_results.npz` — Resultados de diagonalización exacta
-- `data/trotter_results.npz` — Resultados de simulación trotterizada
-- `data/comparison.json` — Tabla de comparación cuántico vs. clásico
+Cada sección guarda sus resultados en `data/` como JSON vía
+`src/persistence.py` — un archivo permanente con timestamp UTC
+(`<sección>_<timestamp>.json`) y un puntero `<sección>_latest.json` que se
+sobrescribe en cada corrida:
+
+| Sección | Archivo |
+|---------|---------|
+| `run_ed.py` | `data/ed_latest.json` |
+| `run_adiabatic.py` | `data/adiabatic_latest.json` |
+| `run_quench.py` | `data/quench_latest.json` |
+| `run_h2_emulator.py` | `data/h2_emulator_raw_latest.json` (bitstrings crudos + metadatos, guardados **antes** de cualquier post-procesamiento) y `data/h2_emulator_latest.json` (observables ya calculados vs. ED) |
+
+El guardado de `h2_emulator_raw` ocurre inmediatamente después de que cada
+job de qnexus devuelve resultados — antes de convertir bitstrings a
+observables — para que un error en el post-procesamiento nunca obligue a
+reenviar el circuito (y volver a gastar cuota) para recuperar datos que el
+hardware ya devolvió.
 
 ---
 
@@ -248,4 +295,4 @@ MIT License — ver [LICENSE](LICENSE) para detalles.
 
 ---
 
-> **Nota para jueces:** Todo el código es reproducible desde un entorno limpio usando `requirements.txt`. El script `main.py` es el único punto de entrada necesario para regenerar todas las figuras y cifras reportadas.
+> **Nota para jueces:** Todo el código es reproducible desde un entorno limpio usando `requirements.txt`. El script `main.py` en la raíz del repositorio es el único punto de entrada necesario para regenerar todas las figuras y cifras reportadas (secciones 1–3; la sección 4, emulador Quantinuum H2, requiere `config.RUN_ON_H2_EMULATOR = True` y una sesión de `qnexus`, ya que consume cuota de uso medida).
