@@ -233,6 +233,7 @@ pytest tests/ -v
 3. Ebadi, S. et al. "Quantum phases of matter on a 256-atom programmable quantum simulator." *Nature* 595, 2021.
 4. Bravyi, S. & Kitaev, A. "Fermionic quantum computation." *Ann. Phys.* 298, 2002.
 5. Jordan, P. & Wigner, E. "Über das Paulische Äquivalenzverbot." *Z. Phys.* 47, 1928.
+6. "Superconducting pairing correlations on a trapped-ion quantum computer." arXiv:2511.02125v3, 2025. [arxiv.org/abs/2511.02125](https://arxiv.org/abs/2511.02125)
 
 ---
 
