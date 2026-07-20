@@ -235,6 +235,14 @@ desde `src/`):
 | Convergencia adiabática | ⟨Z⟩, ⟨ZᵢZᵢ₊₁⟩, ⟨X⟩ vs. tiempo de barrido para cada `h` objetivo, con línea de referencia ED y marca del fin de la rampa | `run_adiabatic.py` | `figures/adiabatic_convergence.png` |
 | Transición de fase | ⟨Z⟩, ⟨X⟩, ⟨ZᵢZᵢ₊₁⟩ finales vs. h/J objetivo — Trotter vs. ED, con la línea crítica h/J=1 | `run_adiabatic.py` | `figures/phase_transition.png` |
 | Evolución "quench" | ⟨Z⟩ y ⟨ZᵢZᵢ₊₁⟩ vs. tiempo, ED vs. Trotter local, para cada `h` en `config.H_VALUES` | `run_quench.py` | `figures/fixed_hamiltonian_evolution.png` |
+| Quench en H2 vs. ED | ⟨Z⟩ y ⟨ZᵢZᵢ₊₁⟩ vs. tiempo, emulador H2 (con barras de error bootstrap) vs. ED, para cada `h` en `config.H2_H_VALUES` | `run_h2_emulator.py` (`run()`) | `figures/h2_vs_ed_time.png` |
+| Transición de fase en H2 (barrido adiabático) | ⟨Z⟩/⟨ZᵢZᵢ₊₁⟩ finales vs. h/J tras una rampa adiabática de longitud fija ejecutada en el emulador H2, vs. ED | `run_h2_emulator.py` (`run_phase_transition()`) | `figures/h2_phase_transition.png` |
+| Convergencia de VQE | Energía / ⟨Z⟩ / ⟨ZᵢZᵢ₊₁⟩ del ansatz hardware-efficient vs. iteración de COBYLA, comparado con el estado fundamental ED | `run_h2_emulator.py` (`run_vqe()`, vía `vqe.py`) | `figures/vqe_convergence.png` |
+| Transición de fase vía VQE | ⟨Z⟩/⟨ZᵢZᵢ₊₁⟩ del estado fundamental hallado por VQE vs. h/J objetivo, vs. ED | `run_h2_emulator.py` (`run_vqe()`) | `figures/h2_phase_transition_vqe.png` |
+
+`plot_h2_comparison.py` es un script auxiliar independiente para regenerar
+las figuras H2/ED/VQE a partir de los datos ya guardados en `data/` (vía
+`persistence.load_latest`), sin volver a someter jobs a qnexus.
 
 `src/ed_figures.py` contiene generación de figuras adicional (magnetización
 multi-N, convergencia de Trotter vs. Δt, correlaciones vs. distancia) pero
@@ -254,7 +262,9 @@ sobrescribe en cada corrida:
 | `run_ed.py` | `data/ed_latest.json` |
 | `run_adiabatic.py` | `data/adiabatic_latest.json` |
 | `run_quench.py` | `data/quench_latest.json` |
-| `run_h2_emulator.py` | `data/h2_emulator_raw_latest.json` (bitstrings crudos + metadatos, guardados **antes** de cualquier post-procesamiento) y `data/h2_emulator_latest.json` (observables ya calculados vs. ED) |
+| `run_h2_emulator.py` (`run()`, quench) | `data/h2_emulator_raw_latest.json` (bitstrings crudos + metadatos, guardados **antes** de cualquier post-procesamiento) y `data/h2_emulator_latest.json` (observables ya calculados vs. ED) |
+| `run_h2_emulator.py` (`run_phase_transition()`, adiabático) | `data/h2_adiabatic_raw_latest.json` y `data/h2_adiabatic_latest.json` |
+| `run_h2_emulator.py` (`run_vqe()`) | `data/h2_vqe_raw_latest.json` y `data/h2_vqe_latest.json` |
 
 El guardado de `h2_emulator_raw` ocurre inmediatamente después de que cada
 job de qnexus devuelve resultados — antes de convertir bitstrings a
@@ -325,4 +335,4 @@ MIT License — ver [LICENSE](LICENSE) para detalles.
 
 ---
 
-> **Nota para jueces:** Todo el código es reproducible desde un entorno limpio usando `requirements.txt`. El script `main.py` en la raíz del repositorio es el único punto de entrada necesario para regenerar todas las figuras y cifras reportadas (secciones 1–3; la sección 4, emulador Quantinuum H2, requiere `config.RUN_ON_H2_EMULATOR = True` y una sesión de `qnexus`, ya que consume cuota de uso medida).
+> **Nota para jueces:** Todo el código es reproducible desde un entorno limpio usando `requirements.txt`. El script `main.py` en la raíz del repositorio es el único punto de entrada necesario para regenerar todas las figuras y cifras reportadas de las secciones 1–3 (más el quench de la sección 4). La sección 4 completa — emulador Quantinuum H2: quench, barrido adiabático y VQE — requiere `config.RUN_ON_H2_EMULATOR = True` y una sesión de `qnexus`, ya que consume cuota de uso medida; el barrido adiabático (`--phase-transition`) y el VQE (`--vqe`) se invocan aparte de `main.py` por costo adicional de cuota (ver "Funciones adicionales del emulador H2" arriba).
