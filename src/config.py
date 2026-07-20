@@ -81,5 +81,18 @@ H2_ADIABATIC_SHOTS = 2000    # bumped from 500 -- bootstrap SE at 500 shots was 
 H2_VQE_N = 6                 # reuses the N used for H2_ADIABATIC_N
 H2_VQE_SHOTS = 200
 H2_VQE_MAX_ITERS = 15        # COBYLA iterations -- ~15 real batch round-trips per h/J
+                             # (kept small: this is what actually submits to real
+                             # H2-1LE via qnexus and costs quota)
 H2_VQE_TOL = 1e-2            # matches Quantinuum's reference tol
 H2_VQE_SEED = 10             # matches the reference snippet's random.seed(a=10)
+
+# Local-only VQE budget (local_emulator_backend, no quota cost) -- COBYLA on a
+# 6*N=36-parameter HEA needs on the order of 500 evaluations to converge even
+# with exact (noiseless) expectation values, and 200-shot noise alone costs
+# another ~2-4x in converged energy accuracy on top of that (measured: 200
+# shots -> 36% gap from ED, 1000 -> 22%, 4000 -> 11%, at 500 iters each) --
+# so both shots and iters need to go up together for a local run to actually
+# reach the ansatz's true reach (~2-3% gap noiseless). H2_VQE_MAX_ITERS above
+# stays small on purpose since qnexus submissions cost real quota.
+H2_VQE_SHOTS_LOCAL = 4000
+H2_VQE_MAX_ITERS_LOCAL = 500

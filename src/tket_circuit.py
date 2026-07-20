@@ -127,6 +127,33 @@ def build_hea_ansatz_circuit(N, params):
     return circuit
 
 
+def build_hva_ansatz_circuit(N, color_edges, theta_zz, theta_x):
+    """Hamiltonian Variational Ansatz for VQE: p layers of (ZZPhase, Rx),
+    starting from |+...+>, reusing the same edge-colored layer structure as
+    the Trotter circuit (build_single_layer_circuit/_append_trotter_layers)
+    but with a free variational angle per layer instead of a fixed Trotter
+    step angle -- p*2 parameters total (theta_zz[l], theta_x[l] per layer),
+    vs. the HEA's 6*N, since it bakes in the TFIM's own term structure
+    rather than being problem-agnostic.
+
+    No measurement is appended here -- that's added per measurement-basis
+    group by the VQE driver (see vqe.py). theta_zz/theta_x are in radians
+    here (converted to pytket's half-turn convention internally), matching
+    vqe.py's parameter convention for the HEA ansatz.
+    """
+    p = len(theta_zz)
+    circuit = Circuit(N)
+    for i in range(N):
+        circuit.H(i)
+    for l in range(p):
+        for edge_list in color_edges:
+            for (i, j) in edge_list:
+                circuit.ZZPhase(theta_zz[l] / math.pi, i, j)
+        for i in range(N):
+            circuit.Rx(theta_x[l] / math.pi, i)
+    return circuit
+
+
 def build_adiabatic_circuit(N, color_edges, ramp_steps, dt, h_target, J, h_init, mirror=True):
     """Build a pytket Circuit implementing an adiabatic ramp from h_init to
     h_target (J: 0 -> J) over `ramp_steps` fixed-length layers, starting

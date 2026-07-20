@@ -276,17 +276,24 @@ def run_vqe(local=False):
     raw_stage = "h2_vqe_raw_local" if local else "h2_vqe_raw"
     results_stage = "h2_vqe_local" if local else "h2_vqe"
 
+    # Local runs cost no quota, so they can afford the much larger shots/iters
+    # budget COBYLA actually needs to converge a 36-parameter HEA (see
+    # config.py's H2_VQE_SHOTS_LOCAL/H2_VQE_MAX_ITERS_LOCAL comment) --
+    # qnexus keeps the small, quota-safe defaults.
+    shots = config.H2_VQE_SHOTS_LOCAL if local else config.H2_VQE_SHOTS
+    max_iters = config.H2_VQE_MAX_ITERS_LOCAL if local else config.H2_VQE_MAX_ITERS
+
     ed_results = ed_baseline(config.H2_VQE_N, config.H2_H_VALUES, J=config.J)
 
     results = {}
     for h in config.H2_H_VALUES:
         print(f"\nRunning VQE: N={config.H2_VQE_N}, h/J={h:.2f}, "
-              f"max_iters={config.H2_VQE_MAX_ITERS}, shots={config.H2_VQE_SHOTS} "
+              f"max_iters={max_iters}, shots={shots} "
               f"on {config.H2_DEVICE_NAME} ...")
 
         vqe_result = run_vqe_h2(
-            config.H2_VQE_N, h, config.J, config.H2_VQE_SHOTS,
-            config.H2_VQE_MAX_ITERS, config.H2_VQE_TOL, config.H2_VQE_SEED,
+            config.H2_VQE_N, h, config.J, shots,
+            max_iters, config.H2_VQE_TOL, config.H2_VQE_SEED,
             device_name=config.H2_DEVICE_NAME, project_name=config.H2_PROJECT_NAME,
             submit_fn=submit_vqe_batch_job, raw_stage=raw_stage,
         )

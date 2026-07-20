@@ -27,10 +27,11 @@ from pytket.utils import expectation_from_shots
 from pytket.utils.operators import QubitPauliOperator
 from scipy.optimize import minimize
 
+from circuits import build_chain_color_edges
 from persistence import save_stage_results
 from qnexus_backend import submit_vqe_batch_job
 from shot_observables import bitstrings_to_observables, bootstrap_observable_errors
-from tket_circuit import build_hea_ansatz_circuit
+from tket_circuit import build_hea_ansatz_circuit, build_hva_ansatz_circuit
 
 
 def build_tfim_pauli_operator(N, J, h):
@@ -77,10 +78,21 @@ def energy_from_batch(measurement_setup, operator, bitstring_lists):
 
 
 def run_vqe_h2(N, h_target, J, n_shots, max_iters, tol, seed, device_name="H2-1LE",
-               project_name="ftim-hackathon", submit_fn=submit_vqe_batch_job, raw_stage="h2_vqe_raw"):
+               project_name="ftim-hackathon", submit_fn=submit_vqe_batch_job, raw_stage="h2_vqe_raw",
+               ansatz="hea", p=None):
     """Run one VQE ground-state search (fixed h_target) against the H2
-    emulator: COBYLA over the HEA's 6*N parameters, one batched
+    emulator: COBYLA over the ansatz's parameters, one batched
     Z-basis+X-basis circuit submission per iteration.
+
+    ansatz: "hea" (default) uses the problem-agnostic 6*N-parameter
+    hardware-efficient ansatz (build_hea_ansatz_circuit). "hva" uses the
+    Hamiltonian Variational Ansatz (build_hva_ansatz_circuit) instead --
+    p layers of (ZZPhase, Rx) mirroring the TFIM's own term structure (the
+    same edge-colored layer as the Trotter circuit), just 2*p parameters
+    total. Since it bakes in problem structure rather than being generic,
+    it needs far fewer COBYLA evaluations to reach a comparable energy.
+    p: number of HVA layers (required, ignored, when ansatz="hva"); a
+    reasonable starting point is p=2-4.
 
     submit_fn: defaults to qnexus_backend.submit_vqe_batch_job -- pass
     local_emulator_backend.submit_vqe_batch_job instead to run against the
@@ -98,6 +110,16 @@ def run_vqe_h2(N, h_target, J, n_shots, max_iters, tol, seed, device_name="H2-1L
     Returns {'energy_history', 'final_params', 'final_energy',
     'final_z_rms', 'final_z_err', 'final_mzz', 'final_mzz_err'}.
     """
+    if ansatz == "hva":
+        color_edges = build_chain_color_edges(N)
+        num_params = 2 * p
+
+        def build_ansatz(params):
+            return build_hva_ansatz_circuit(N, color_edges, params[:p], params[p:])
+    else:
+        num_params = 6 * N
+        build_ansatz = lambda params: build_hea_ansatz_circuit(N, params)
+
     operator = build_tfim_pauli_operator(N, J, h_target)
     pauli_strings = list(operator._dict.keys())
     measurement_setup = measurement_reduction(pauli_strings, PauliPartitionStrat.CommutingSets)
@@ -113,10 +135,10 @@ def run_vqe_h2(N, h_target, J, n_shots, max_iters, tol, seed, device_name="H2-1L
     best = {'energy': None, 'bitstring_lists': None}
 
     def objective(params):
-        ansatz = build_hea_ansatz_circuit(N, params)
+        ansatz_circuit = build_ansatz(params)
         circuits = []
         for mc in measurement_setup.measurement_circs:
-            full = ansatz.copy()
+            full = ansatz_circuit.copy()
             full.append(mc)
             circuits.append(full)
 
@@ -147,7 +169,7 @@ def run_vqe_h2(N, h_target, J, n_shots, max_iters, tol, seed, device_name="H2-1L
         return energy
 
     random.seed(seed)
-    initial_params = np.array([2 * np.pi * random.uniform(0, 1) for _ in range(6 * N)])
+    initial_params = np.array([2 * np.pi * random.uniform(0, 1) for _ in range(num_params)])
 
     result = minimize(
         objective, initial_params, method="COBYLA",
