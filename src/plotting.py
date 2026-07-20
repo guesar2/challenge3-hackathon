@@ -146,41 +146,46 @@ def plot_fixed_hamiltonian_evolution(h_values, evolution_results, ed_results, sa
     return fig
 
 
-def plot_h2_vs_ed(h_values, z_h2, z_err, mzz_h2, mzz_err, z_ed, mzz_ed,
-                   save_dir=None, saved_at=None):
-    """Quantinuum H2 emulator run vs. the ED ground state, per target h/J.
+def plot_h2_vs_ed_time(h_values, time_series_data, save_dir=None, saved_at=None):
+    """<Z> and <Zi Zi+1> vs. time for the H2 emulator quench, one row per h/J,
+    with the ED exact evolution as a continuous reference curve.
 
-    z_err/mzz_err are shot-noise standard errors (bootstrap over the raw
-    measured shots -- see qnexus_backend.bootstrap_observable_errors),
-    shown as error bars so the hardware numbers aren't reported without a
-    noise estimate alongside them.
+    time_series_data: dict h -> {'times', 'z_h2', 'z_err', 'mzz_h2',
+    'mzz_err', 'z_ed', 'mzz_ed'} (see run_h2_emulator.run()). z_err/mzz_err
+    are shot-noise standard errors (bootstrap over the raw measured shots --
+    see qnexus_backend.bootstrap_observable_errors), shown as error bars so
+    the hardware numbers aren't reported without a noise estimate alongside
+    them.
     """
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(11, 4.5))
+    fig, axes = plt.subplots(len(h_values), 2, figsize=(12, 4 * len(h_values)))
 
-    ax1.errorbar(h_values, z_h2, yerr=z_err, fmt='bo', markersize=8, capsize=4,
-                 label='H2 emulator')
-    ax1.plot(h_values, z_ed, 'rs--', markersize=8, label='ED (ground state)')
-    ax1.axvline(x=1.0, color='gray', linestyle=':', alpha=0.7, label='Critical h/J=1')
-    ax1.set_xlabel('h / J')
-    ax1.set_ylabel(r'$\langle Z \rangle$ (RMS per site)')
-    ax1.set_title('Quantinuum H2 vs. ED — <Z>')
-    ax1.grid(True, alpha=0.3)
-    ax1.legend()
+    for idx, h in enumerate(h_values):
+        r = time_series_data[h]
 
-    ax2.errorbar(h_values, mzz_h2, yerr=mzz_err, fmt='bo', markersize=8, capsize=4,
-                 label='H2 emulator')
-    ax2.plot(h_values, mzz_ed, 'rs--', markersize=8, label='ED (ground state)')
-    ax2.axvline(x=1.0, color='gray', linestyle=':', alpha=0.7, label='Critical h/J=1')
-    ax2.set_xlabel('h / J')
-    ax2.set_ylabel(r'$\langle Z_i Z_{i+1} \rangle$')
-    ax2.set_title('Quantinuum H2 vs. ED — <Zi Zi+1>')
-    ax2.grid(True, alpha=0.3)
-    ax2.legend()
+        ax1 = axes[idx, 0] if len(h_values) > 1 else axes[0]
+        ax1.plot(r['times'], r['z_ed'], 'r-', linewidth=2, label='ED (exact)')
+        ax1.errorbar(r['times'], r['z_h2'], yerr=r['z_err'], fmt='bo', markersize=6,
+                     capsize=4, label='H2 emulator')
+        ax1.set_xlabel('Time t')
+        ax1.set_ylabel(r'$\langle Z \rangle$ (RMS per site)')
+        ax1.set_title(f'h/J = {h:.1f} (starting from |0...0>)')
+        ax1.grid(True, alpha=0.3)
+        ax1.legend(loc='best', fontsize=8)
+
+        ax2 = axes[idx, 1] if len(h_values) > 1 else axes[1]
+        ax2.plot(r['times'], r['mzz_ed'], 'r-', linewidth=2, label='ED (exact)')
+        ax2.errorbar(r['times'], r['mzz_h2'], yerr=r['mzz_err'], fmt='bo', markersize=6,
+                     capsize=4, label='H2 emulator')
+        ax2.set_xlabel('Time t')
+        ax2.set_ylabel(r'$\langle Z_i Z_{i+1} \rangle$')
+        ax2.set_title(f'h/J = {h:.1f} (starting from |0...0>)')
+        ax2.grid(True, alpha=0.3)
+        ax2.legend(loc='best', fontsize=8)
 
     title = 'Quantinuum H2 Emulator Quench vs. Exact Diagonalization (error bars: shot noise)'
     if saved_at:
         title += f'\nrun: {saved_at}'
     fig.suptitle(title, fontsize=10)
 
-    _finalize(fig, 'h2_vs_ed.png', save_dir)
+    _finalize(fig, 'h2_vs_ed_time.png', save_dir)
     return fig

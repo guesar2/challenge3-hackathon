@@ -127,37 +127,3 @@ def bootstrap_observable_errors(bitstrings, N, n_boot=1000, seed=0):
         idx = rng.integers(0, n_shots, size=n_shots)
         z_samples[b], mzz_samples[b] = _observables_from_shots(shots[idx], N)
     return z_samples.std(ddof=1), mzz_samples.std(ddof=1)
-
-
-def assemble_h2_vs_ed(processed_results: dict, raw_results: dict):
-    """Combine a {h -> observables} dict (from run_h2_emulator's `results`,
-    or the reloaded data/h2_emulator_latest.json `results`) with the
-    matching {h -> raw job record} dict (`raw_by_h`, or the reloaded
-    data/h2_emulator_raw_latest.json `results`) into plot-ready arrays,
-    computing shot-noise error bars from the raw bitstrings.
-
-    Both dicts must use the same key type for `h` (either both the float
-    keys used in-memory during a live run, or both the string keys that
-    round-trip through JSON) -- that's how a fresh in-memory run and a
-    reloaded persisted run both work with this same function.
-    """
-    h_values = sorted(processed_results.keys(), key=float)
-    z_h2, z_err, mzz_h2, mzz_err, z_ed, mzz_ed = [], [], [], [], [], []
-    for h in h_values:
-        entry = processed_results[h]
-        raw_entry = raw_results[h]
-        z_se, mzz_se = bootstrap_observable_errors(raw_entry["bitstrings"], raw_entry["N"])
-
-        z_h2.append(entry["z_rms_h2"])
-        z_err.append(z_se)
-        mzz_h2.append(entry["mzz_h2"])
-        mzz_err.append(mzz_se)
-        z_ed.append(entry["z_ed"])
-        mzz_ed.append(entry["mzz_ed"])
-
-    return {
-        "h_values": [float(h) for h in h_values],
-        "z_h2": z_h2, "z_err": z_err,
-        "mzz_h2": mzz_h2, "mzz_err": mzz_err,
-        "z_ed": z_ed, "mzz_ed": mzz_ed,
-    }
