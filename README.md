@@ -137,11 +137,10 @@ Este script orquesta las cuatro secciones del pipeline en secuencia, con paráme
 Cada sección es independiente — calcula su propia línea base ED y no depende de que las demás se hayan ejecutado antes — así que se puede verificar una sin correr el resto:
 
 ```bash
-cd src
-python run_ed.py            # solo línea base ED (rápido, puramente clásico)
-python run_adiabatic.py     # solo el barrido adiabático
-python run_quench.py        # solo la evolución "quench"
-python run_h2_emulator.py   # no-op salvo que config.RUN_ON_H2_EMULATOR = True
+python src/run_ed.py            # solo línea base ED (rápido, puramente clásico)
+python src/run_adiabatic.py     # solo el barrido adiabático
+python src/run_quench.py        # solo la evolución "quench"
+python src/run_h2_emulator.py   # no-op salvo que config.RUN_ON_H2_EMULATOR = True
 ```
 
 ### Ejecución por notebooks (desarrollo interactivo)
