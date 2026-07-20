@@ -12,9 +12,10 @@ optimizer step, which is infeasible even absent quota limits.
 
 pytket's measurement_reduction groups the TFIM Hamiltonian's terms into the
 minimum number of commuting measurement circuits (2: all-ZZ in the Z basis,
-all-X in the X basis), and qnexus_backend.submit_vqe_batch_job submits both
-of an iteration's circuits in a single compile/execute round trip -- the
-Nexus-layer equivalent of the reference's start_batch/add_to_batch.
+all-X in the X basis), and submit_vqe_batch_job (qnexus_backend's by
+default, or local_emulator_backend's -- see run_vqe_h2's submit_fn param)
+submits both of an iteration's circuits in a single compile/execute round
+trip -- the Nexus-layer equivalent of the reference's start_batch/add_to_batch.
 """
 import random
 
@@ -27,7 +28,8 @@ from pytket.utils.operators import QubitPauliOperator
 from scipy.optimize import minimize
 
 from persistence import save_stage_results
-from qnexus_backend import bitstrings_to_observables, bootstrap_observable_errors, submit_vqe_batch_job
+from qnexus_backend import submit_vqe_batch_job
+from shot_observables import bitstrings_to_observables, bootstrap_observable_errors
 from tket_circuit import build_hea_ansatz_circuit
 
 
@@ -75,10 +77,19 @@ def energy_from_batch(measurement_setup, operator, bitstring_lists):
 
 
 def run_vqe_h2(N, h_target, J, n_shots, max_iters, tol, seed, device_name="H2-1LE",
-               project_name="ftim-hackathon"):
+               project_name="ftim-hackathon", submit_fn=submit_vqe_batch_job, raw_stage="h2_vqe_raw"):
     """Run one VQE ground-state search (fixed h_target) against the H2
     emulator: COBYLA over the HEA's 6*N parameters, one batched
     Z-basis+X-basis circuit submission per iteration.
+
+    submit_fn: defaults to qnexus_backend.submit_vqe_batch_job -- pass
+    local_emulator_backend.submit_vqe_batch_job instead to run against the
+    free local pytket-quantinuum/pecos backend (same call signature, same
+    computation, since H2-1LE has no physical noise model either way).
+    raw_stage: persistence stage name for each iteration's raw shots --
+    callers running locally should pass a distinct name (e.g.
+    "h2_vqe_raw_local") so local runs never overwrite a real qnexus run's
+    saved data.
 
     Persists each iteration's raw batch result immediately (before
     computing the energy from it), same crash-safety pattern as the
@@ -110,7 +121,7 @@ def run_vqe_h2(N, h_target, J, n_shots, max_iters, tol, seed, device_name="H2-1L
             circuits.append(full)
 
         iteration = len(energy_history)
-        bitstring_lists = submit_vqe_batch_job(
+        bitstring_lists = submit_fn(
             circuits, n_shots, device_name=device_name, project_name=project_name,
             job_name=f"tfim-vqe-N{N}-h{h_target:.2f}-iter{iteration}",
         )
@@ -119,7 +130,7 @@ def run_vqe_h2(N, h_target, J, n_shots, max_iters, tol, seed, device_name="H2-1L
         # the energy from it -- so a bug downstream never means
         # resubmitting to recover results that already came back.
         raw_by_iteration[iteration] = bitstring_lists
-        save_stage_results("h2_vqe_raw", raw_by_iteration)
+        save_stage_results(raw_stage, raw_by_iteration)
 
         energy = energy_from_batch(measurement_setup, operator, bitstring_lists)
         energy_history.append(energy)

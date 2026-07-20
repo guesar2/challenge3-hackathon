@@ -1,66 +1,89 @@
 """
 run_h2_emulator.py
 
-Capstone section 4/4: TFIM Trotter quench circuit run on a Quantinuum-hosted
-backend (default: the H2-1LE noiseless-leakage emulator) via qnexus, with
-the circuit built in pytket (see tket_circuit.py).
+Capstone section 4/4: TFIM Trotter quench circuit run against H2-1LE, with
+the circuit built in pytket (see tket_circuit.py). Two interchangeable
+backends, selected via each function's `local` argument (also `--local` on
+the command line):
 
-Off by default -- config.RUN_ON_H2_EMULATOR gates every call in this module,
-since it requires a live qnexus login and costs against a metered usage
-quota. This is the one section main.py / ftim_main.py will still print-and-
-skip unless the flag is flipped; run standalone with
-`python run_h2_emulator.py` once you're ready to spend quota.
+- qnexus_backend (default, local=False): submits over the network through
+  qnexus. Requires a live qnexus login and costs against a metered usage
+  quota -- config.RUN_ON_H2_EMULATOR gates every call in this mode. This is
+  the one section main.py / ftim_main.py will still print-and-skip unless
+  that flag is flipped; run standalone with `python run_h2_emulator.py`
+  once you're ready to spend quota.
+- local_emulator_backend (local=True): runs the same circuits locally via
+  pytket-quantinuum + pytket-pecos (`pip install "pytket-quantinuum[pecos]"`).
+  H2-1LE is exact noiseless state-vector emulation (only shot noise, no
+  physical noise model -- see qnexus_backend.py's docstring for the source
+  quote), so this is the *same* computation as the qnexus path, just free
+  and instant instead of network-queued and quota-metered. Not gated by
+  RUN_ON_H2_EMULATOR since there's no quota to protect. Results are saved
+  under a "_local" stage suffix so they never overwrite a real qnexus run's
+  saved data.
 
-Because every submission here costs quota, raw shot data is persisted
+Because every qnexus submission costs quota, raw shot data is persisted
 (data/h2_emulator_raw_*.json) immediately after each job returns -- before
 any postprocessing -- so a bug in bitstrings_to_observables (or anything
 downstream) never means re-submitting to recover results that already came
-back from the hardware.
+back. The same persist-immediately pattern is kept for local runs too, for
+consistency, even though there's no quota risk there.
 """
 import config
 from exact_diagonalization import ed_baseline, ed_time_evolution_exact
 from persistence import save_stage_results, load_latest
 from plotting import plot_h2_vs_ed_time, plot_h2_phase_transition, plot_vqe_convergence
+from shot_observables import bitstrings_to_observables, bootstrap_observable_errors
 
 
-def run():
+def run(local=False):
     print("=" * 60)
-    print(f"STAGE 4/4: QUANTINUUM {config.H2_DEVICE_NAME} EMULATOR (qnexus/pytket)")
+    print(f"STAGE 4/4: QUANTINUUM {config.H2_DEVICE_NAME} EMULATOR "
+          f"({'local pytket-quantinuum/pecos' if local else 'qnexus/pytket'})")
     print("=" * 60)
 
-    if not config.RUN_ON_H2_EMULATOR:
+    if not local and not config.RUN_ON_H2_EMULATOR:
         print("Skipped (config.RUN_ON_H2_EMULATOR = False). Enable it to submit "
-              "jobs to qnexus -- this consumes a metered usage quota.")
+              "jobs to qnexus -- this consumes a metered usage quota. "
+              "(Or pass local=True / --local to run for free instead.)")
         return None
 
-    from qnexus_backend import submit_quench_job, bitstrings_to_observables, bootstrap_observable_errors
+    if local:
+        from local_emulator_backend import submit_quench_batch
+    else:
+        from qnexus_backend import submit_quench_batch
+    raw_stage = "h2_emulator_raw_local" if local else "h2_emulator_raw"
+    results_stage = "h2_emulator_local" if local else "h2_emulator"
 
     # qnexus/H2 only returns final measurement shots -- no mid-circuit
-    # statevector readout -- so a <Z>/<Zi Zi+1> vs. time curve needs one job
-    # per (h, step_count) snapshot rather than one job per h.
+    # statevector readout -- so a <Z>/<Zi Zi+1> vs. time curve needs one
+    # circuit per (h, step_count) snapshot. submit_quench_batch submits the
+    # whole step_count curve for one h as a single compile/execute call
+    # (rather than one queue-wait per step) since Quantinuum's own
+    # hardware-only batching feature doesn't apply to the H2-1LE emulator.
     raw_by_h = {}
     results = {}
+    step_counts = list(range(1, config.H2_STEPS + 1))
     for h in config.H2_H_VALUES:
-        raw_by_h[h] = {}
+        print(f"\nSubmitting N={config.H2_N}, h/J={h:.2f}, dt={config.H2_DT}, "
+              f"steps=1..{config.H2_STEPS} (batched), shots={config.H2_SHOTS} "
+              f"to {config.H2_DEVICE_NAME} ...")
+
+        batch_results = submit_quench_batch(
+            config.H2_N, h, config.J, config.H2_DT, step_counts,
+            config.H2_SHOTS, device_name=config.H2_DEVICE_NAME,
+            project_name=config.H2_PROJECT_NAME,
+        )
+
+        # Persist the raw hardware result immediately -- before any
+        # postprocessing -- so it survives even if bitstrings_to_observables
+        # (or anything after it) turns out to be buggy.
+        raw_by_h[h] = batch_results
+        save_stage_results(raw_stage, raw_by_h)
+
         times, z_h2, z_err, mzz_h2, mzz_err = [], [], [], [], []
-
-        for step_count in range(1, config.H2_STEPS + 1):
-            print(f"\nSubmitting N={config.H2_N}, h/J={h:.2f}, dt={config.H2_DT}, "
-                  f"steps={step_count}/{config.H2_STEPS}, shots={config.H2_SHOTS} "
-                  f"to {config.H2_DEVICE_NAME} ...")
-
-            job_result = submit_quench_job(
-                config.H2_N, h, config.J, config.H2_DT, step_count,
-                config.H2_SHOTS, device_name=config.H2_DEVICE_NAME,
-                project_name=config.H2_PROJECT_NAME,
-            )
-
-            # Persist the raw hardware result immediately -- before any
-            # postprocessing -- so it survives even if bitstrings_to_observables
-            # (or anything after it) turns out to be buggy.
-            raw_by_h[h][step_count] = job_result
-            save_stage_results("h2_emulator_raw", raw_by_h)
-
+        for step_count in step_counts:
+            job_result = batch_results[step_count]
             z_rms, mzz = bitstrings_to_observables(job_result["bitstrings"], config.H2_N)
             z_se, mzz_se = bootstrap_observable_errors(job_result["bitstrings"], config.H2_N)
 
@@ -87,61 +110,114 @@ def run():
             'z_ed': list(z_ed), 'mzz_ed': list(mzz_ed),
         }
 
-    save_stage_results("h2_emulator", results)
+    save_stage_results(results_stage, results)
 
-    plot_h2_vs_ed_time(config.H2_H_VALUES, results, save_dir=config.PLOT_SAVE_DIR)
+    plot_h2_vs_ed_time(
+        config.H2_H_VALUES, results, save_dir=config.PLOT_SAVE_DIR,
+        filename="h2_vs_ed_time_local.png" if local else "h2_vs_ed_time.png",
+    )
 
     return results
 
 
-def run_phase_transition():
+def run_phase_transition(local=False):
     """Adiabatic-ramp sweep on H2: the phase-transition signal (<Z>/<Zi
     Zi+1> vs. h/J across the h/J=1 critical point) reproduced on hardware,
     rather than the fixed-h quench-vs-time protocol in run().
 
     Not called from run() or from ftim_main.py -- invoke explicitly (e.g.
-    `python -c "import run_h2_emulator; run_h2_emulator.run_phase_transition()"`)
-    since it's a separate, additional quota cost on top of run(). Still
-    gated by config.RUN_ON_H2_EMULATOR.
+    `python run_h2_emulator.py --phase-transition`) since it's a separate,
+    additional quota cost on top of run() when local=False. Pass
+    local=True (or --local --phase-transition on the command line) to run
+    against local_emulator_backend instead -- free and instant, same
+    computation, results saved under a "_local" stage suffix so they never
+    overwrite a real qnexus run. Gated by config.RUN_ON_H2_EMULATOR only
+    when local=False.
 
-    Uses a fixed ramp length (config.H2_ADIABATIC_STEPS) for every h
-    target rather than sweep_schedule.steps_for_target's rate-based
-    scaling, which would need thousands of steps per job -- infeasible to
-    submit to qnexus.
+    Ramp length is scaled per h target via sweep_schedule.steps_for_target
+    (targeting |dh/dt| ~= config.H2_ADIABATIC_RATE_REF, same logic as the
+    local pipeline's adiabatic sweep), capped at config.H2_ADIABATIC_MAX_STEPS
+    -- a single flat step count for every target was tried first and
+    over-Trotterized targets close to H_INIT without any adiabaticity
+    benefit (see config.py's H2_ADIABATIC_RATE_REF comment for the numbers).
+
+    The critical point h/J=1 is pinned to H2_ADIABATIC_MAX_STEPS regardless
+    of |h_target - h_init|: |Delta h|-based scaling assumes ramp difficulty
+    depends only on distance from h_init, but h/J=1 is where the TFIM gap
+    closes, so critical slowing down demands a long ramp independent of
+    that distance. Testing bore this out -- scaling h/J=1 down to 86 steps
+    (its |Delta h|-based value) made its <Zi Zi+1> deviation *worse* than
+    the flat-100-steps baseline, the only target of the three where scaling
+    down hurt rather than helped.
+
+    h/J=1 also uses a finer dt (H2_ADIABATIC_CRITICAL_DT_FACTOR * dt, with
+    steps scaled up to keep the same total ramp time) rather than just more
+    steps at the same dt: with enough shots (2000) to shrink the bootstrap
+    error bar below the deviation itself, h/J=1's <Zi Zi+1> bias turned out
+    to be statistically real (~4.7 sigma, not noise) even at 100 steps --
+    i.e. limited by Trotter step-size error, not by ramp adiabaticity, so
+    only a smaller dt (not a longer ramp at the same dt) should shrink it.
     """
     print("=" * 60)
-    print(f"H2 ADIABATIC SWEEP (phase-transition signal, {config.H2_DEVICE_NAME})")
+    print(f"H2 ADIABATIC SWEEP (phase-transition signal, {config.H2_DEVICE_NAME}, "
+          f"{'local pytket-quantinuum/pecos' if local else 'qnexus/pytket'})")
     print("=" * 60)
 
-    if not config.RUN_ON_H2_EMULATOR:
+    if not local and not config.RUN_ON_H2_EMULATOR:
         print("Skipped (config.RUN_ON_H2_EMULATOR = False). Enable it to submit "
-              "jobs to qnexus -- this consumes a metered usage quota.")
+              "jobs to qnexus -- this consumes a metered usage quota. "
+              "(Or pass local=True / --local to run for free instead.)")
         return None
 
-    from qnexus_backend import submit_adiabatic_job, bitstrings_to_observables, bootstrap_observable_errors
+    if local:
+        from local_emulator_backend import submit_adiabatic_batch
+    else:
+        from qnexus_backend import submit_adiabatic_batch
+    from sweep_schedule import steps_for_target
+    raw_stage = "h2_adiabatic_raw_local" if local else "h2_adiabatic_raw"
+    results_stage = "h2_adiabatic_local" if local else "h2_adiabatic"
 
     ed_results = ed_baseline(config.H2_ADIABATIC_N, config.H2_H_VALUES, J=config.J)
 
-    raw_by_h = {}
-    results = {}
-    for h in config.H2_H_VALUES:
-        print(f"\nSubmitting N={config.H2_ADIABATIC_N}, h_init={config.H_INIT} -> "
-              f"h_target/J={h:.2f}, dt={config.H2_ADIABATIC_DT}, "
-              f"ramp_steps={config.H2_ADIABATIC_STEPS}, shots={config.H2_ADIABATIC_SHOTS} "
-              f"to {config.H2_DEVICE_NAME} ...")
-
-        job_result = submit_adiabatic_job(
-            config.H2_ADIABATIC_N, h, config.J, config.H2_ADIABATIC_STEPS,
-            config.H2_ADIABATIC_DT, config.H2_ADIABATIC_SHOTS, config.H_INIT,
-            device_name=config.H2_DEVICE_NAME, project_name=config.H2_PROJECT_NAME,
+    h_values = list(config.H2_H_VALUES)
+    dt_by_target = [
+        config.H2_ADIABATIC_DT * config.H2_ADIABATIC_CRITICAL_DT_FACTOR if h == config.J
+        else config.H2_ADIABATIC_DT
+        for h in h_values
+    ]
+    ramp_steps_by_target = [
+        # h/J=1: same total ramp time as H2_ADIABATIC_MAX_STEPS steps at the
+        # coarse dt, just resolved with more, finer steps.
+        round(config.H2_ADIABATIC_MAX_STEPS / config.H2_ADIABATIC_CRITICAL_DT_FACTOR) if h == config.J
+        else min(
+            steps_for_target(h, config.H2_ADIABATIC_DT, config.H2_ADIABATIC_RATE_REF, h_init=config.H_INIT),
+            config.H2_ADIABATIC_MAX_STEPS,
         )
+        for h in h_values
+    ]
+    print(f"\nSubmitting N={config.H2_ADIABATIC_N}, h_init={config.H_INIT} -> "
+          f"h_target/J in {h_values} (batched), dt={dt_by_target}, "
+          f"ramp_steps={ramp_steps_by_target} (rate_ref={config.H2_ADIABATIC_RATE_REF}, "
+          f"capped at {config.H2_ADIABATIC_MAX_STEPS}), shots={config.H2_ADIABATIC_SHOTS} "
+          f"to {config.H2_DEVICE_NAME} ...")
 
-        # Persist the raw hardware result immediately -- before any
-        # postprocessing -- so it survives even if bitstrings_to_observables
-        # (or anything after it) turns out to be buggy.
-        raw_by_h[h] = job_result
-        save_stage_results("h2_adiabatic_raw", raw_by_h)
+    # One compile/execute call for the whole h/J sweep instead of one per h
+    # -- see submit_adiabatic_batch's docstring for why (Quantinuum's own
+    # batching feature is hardware-only, doesn't apply to H2-1LE).
+    raw_by_h = submit_adiabatic_batch(
+        config.H2_ADIABATIC_N, h_values, config.J, ramp_steps_by_target,
+        dt_by_target, config.H2_ADIABATIC_SHOTS, config.H_INIT,
+        device_name=config.H2_DEVICE_NAME, project_name=config.H2_PROJECT_NAME,
+    )
 
+    # Persist the raw hardware result immediately -- before any
+    # postprocessing -- so it survives even if bitstrings_to_observables
+    # (or anything after it) turns out to be buggy.
+    save_stage_results(raw_stage, raw_by_h)
+
+    results = {}
+    for h in h_values:
+        job_result = raw_by_h[h]
         z_rms, mzz = bitstrings_to_observables(job_result["bitstrings"], config.H2_ADIABATIC_N)
         z_se, mzz_se = bootstrap_observable_errors(job_result["bitstrings"], config.H2_ADIABATIC_N)
 
@@ -149,22 +225,25 @@ def run_phase_transition():
         ed_mzz = next(r['mzz'] for r in ed_results if r['h'] == h)
         pct_z = abs(z_rms - ed_z) / ed_z * 100 if ed_z != 0 else 0
         pct_mzz = abs(mzz - ed_mzz) / abs(ed_mzz) * 100 if ed_mzz != 0 else 0
-        print(f"  H2 <Z>       = {z_rms:.4f}  (ED = {ed_z:.4f}, {pct_z:.2f}% diff)")
-        print(f"  H2 <Zi Zi+1> = {mzz:.4f}  (ED = {ed_mzz:.4f}, {pct_mzz:.2f}% diff)")
+        print(f"  h/J={h:.2f}: H2 <Z>       = {z_rms:.4f}  (ED = {ed_z:.4f}, {pct_z:.2f}% diff)")
+        print(f"           H2 <Zi Zi+1> = {mzz:.4f}  (ED = {ed_mzz:.4f}, {pct_mzz:.2f}% diff)")
 
         results[h] = {
             'z_h2': z_rms, 'z_err': z_se,
             'mzz_h2': mzz, 'mzz_err': mzz_se,
         }
 
-    save_stage_results("h2_adiabatic", results)
+    save_stage_results(results_stage, results)
 
-    plot_h2_phase_transition(config.H2_H_VALUES, results, ed_results, save_dir=config.PLOT_SAVE_DIR)
+    plot_h2_phase_transition(
+        config.H2_H_VALUES, results, ed_results, save_dir=config.PLOT_SAVE_DIR,
+        filename="h2_phase_transition_local.png" if local else "h2_phase_transition.png",
+    )
 
     return results
 
 
-def run_vqe():
+def run_vqe(local=False):
     """VQE ground-state search on H2: a hardware-efficient ansatz optimized
     via gradient-free COBYLA (see vqe.run_vqe_h2), one independent
     optimization per h/J target -- finds the ground state directly rather
@@ -173,18 +252,29 @@ def run_vqe():
 
     Not called from run() or from ftim_main.py -- invoke explicitly (e.g.
     `python run_h2_emulator.py --vqe`) since it's a separate, additional
-    cost on top of run(). Still gated by config.RUN_ON_H2_EMULATOR.
+    cost on top of run() when local=False. Pass local=True (or --local
+    --vqe on the command line) to run against local_emulator_backend
+    instead -- free and instant, same computation. Gated by
+    config.RUN_ON_H2_EMULATOR only when local=False.
     """
     print("=" * 60)
-    print(f"H2 VQE GROUND-STATE SEARCH ({config.H2_DEVICE_NAME})")
+    print(f"H2 VQE GROUND-STATE SEARCH ({config.H2_DEVICE_NAME}, "
+          f"{'local pytket-quantinuum/pecos' if local else 'qnexus/pytket'})")
     print("=" * 60)
 
-    if not config.RUN_ON_H2_EMULATOR:
+    if not local and not config.RUN_ON_H2_EMULATOR:
         print("Skipped (config.RUN_ON_H2_EMULATOR = False). Enable it to submit "
-              "jobs to qnexus -- this consumes a metered usage quota.")
+              "jobs to qnexus -- this consumes a metered usage quota. "
+              "(Or pass local=True / --local to run for free instead.)")
         return None
 
     from vqe import run_vqe_h2
+    if local:
+        from local_emulator_backend import submit_vqe_batch_job
+    else:
+        from qnexus_backend import submit_vqe_batch_job
+    raw_stage = "h2_vqe_raw_local" if local else "h2_vqe_raw"
+    results_stage = "h2_vqe_local" if local else "h2_vqe"
 
     ed_results = ed_baseline(config.H2_VQE_N, config.H2_H_VALUES, J=config.J)
 
@@ -198,6 +288,7 @@ def run_vqe():
             config.H2_VQE_N, h, config.J, config.H2_VQE_SHOTS,
             config.H2_VQE_MAX_ITERS, config.H2_VQE_TOL, config.H2_VQE_SEED,
             device_name=config.H2_DEVICE_NAME, project_name=config.H2_PROJECT_NAME,
+            submit_fn=submit_vqe_batch_job, raw_stage=raw_stage,
         )
 
         ed_energy = next(r['energy'] for r in ed_results if r['h'] == h) * config.H2_VQE_N
@@ -212,9 +303,12 @@ def run_vqe():
 
         results[h] = vqe_result
 
-    save_stage_results("h2_vqe", results)
+    save_stage_results(results_stage, results)
 
-    plot_vqe_convergence(config.H2_H_VALUES, results, ed_results, save_dir=config.PLOT_SAVE_DIR)
+    plot_vqe_convergence(
+        config.H2_H_VALUES, results, ed_results, save_dir=config.PLOT_SAVE_DIR,
+        filename="vqe_convergence_local.png" if local else "vqe_convergence.png",
+    )
 
     phase_transition_data = {
         h: {
@@ -225,30 +319,35 @@ def run_vqe():
     }
     plot_h2_phase_transition(
         config.H2_H_VALUES, phase_transition_data, ed_results, save_dir=config.PLOT_SAVE_DIR,
-        method_label="VQE", filename="h2_phase_transition_vqe.png",
+        method_label="VQE",
+        filename="h2_phase_transition_vqe_local.png" if local else "h2_phase_transition_vqe.png",
     )
 
     return results
 
 
-def load_last_run():
+def load_last_run(local=False):
     """Convenience accessor for the most recent saved H2 results (raw shots
-    and processed observables), without spending any quota."""
+    and processed observables), without spending any quota. Pass
+    local=True to read back local_emulator_backend runs instead of qnexus
+    ones (they're saved under separate "_local"-suffixed stage names)."""
+    suffix = "_local" if local else ""
     return {
-        "raw": load_latest("h2_emulator_raw"),
-        "processed": load_latest("h2_emulator"),
-        "adiabatic_raw": load_latest("h2_adiabatic_raw"),
-        "adiabatic": load_latest("h2_adiabatic"),
-        "vqe_raw": load_latest("h2_vqe_raw"),
-        "vqe": load_latest("h2_vqe"),
+        "raw": load_latest(f"h2_emulator_raw{suffix}"),
+        "processed": load_latest(f"h2_emulator{suffix}"),
+        "adiabatic_raw": load_latest(f"h2_adiabatic_raw{suffix}"),
+        "adiabatic": load_latest(f"h2_adiabatic{suffix}"),
+        "vqe_raw": load_latest(f"h2_vqe_raw{suffix}"),
+        "vqe": load_latest(f"h2_vqe{suffix}"),
     }
 
 
 if __name__ == "__main__":
     import sys
+    is_local = "--local" in sys.argv
     if "--phase-transition" in sys.argv:
-        run_phase_transition()
+        run_phase_transition(local=is_local)
     elif "--vqe" in sys.argv:
-        run_vqe()
+        run_vqe(local=is_local)
     else:
-        run()
+        run(local=is_local)

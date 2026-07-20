@@ -13,10 +13,61 @@ not radians -- same convention as Qiskit's Operator would give for
 Rx(theta_rad) when passing theta_rad / pi (verified: ZZPhase(alpha, i, j) ==
 qiskit's rzz(alpha * pi) exactly). pytket has a native ZZPhase gate, so no
 CX-Rz-CX decomposition is needed (unlike the earlier Guppy version).
+
+Boundary Rx fusion (_append_trotter_layers, mirror=True path): when the
+symmetric layer Rx(a/2)-ZZPhase-Rx(a/2) repeats, the trailing Rx(a/2) of
+one step and the leading Rx(a/2) of the next sit back-to-back on the same
+qubit with nothing between them, so they combine exactly via
+Rx(a)*Rx(b) = Rx(a+b) into a single gate -- same unitary, no Trotter-error
+cost, just fewer single-qubit gates (steps+1 Rx layers instead of 2*steps).
+Same idea as the "reduction of gate count using circuit identities" used
+for the hopping circuits in Quantinuum's Fermi-Hubbard/pairing-correlations
+paper (arXiv:2511.02125, Fig. S8) -- that paper merges fermionic SWAP gates
+with interaction gates, which doesn't apply here (TFIM has no SWAP network,
+being already nearest-neighbour), but the underlying identity -- merge
+adjacent single-qubit rotations at a layer boundary -- carries over
+directly to the mirrored Rx layer used here. Verified numerically (unitary
+diff ~1e-15) for both the fixed-angle quench circuit and the varying-angle
+adiabatic circuit before landing this.
 """
 import math
 
 from pytket import Circuit
+
+
+def _append_trotter_layers(circuit, N, color_edges, layer_angles, mirror):
+    """Append len(layer_angles) Trotter layers to `circuit` in place.
+
+    layer_angles: list of (x_angle, zz_angle) per step, in pytket half-turns.
+    x_angle is the Rx angle for that step as computed by the caller: already
+    halved when mirror=True (it's applied twice per interior boundary), or
+    the full single-qubit rotation when mirror=False.
+
+    When mirror=True, adjacent half-turn Rx gates at layer boundaries are
+    fused into one Rx via Rx(a)*Rx(b) = Rx(a+b) -- see module docstring.
+    When mirror=False there's no boundary Rx pair to fuse (each layer is
+    just Rx-then-ZZPhase), so this is just the plain unrolled loop.
+    """
+    if not mirror:
+        for x_angle, zz_angle in layer_angles:
+            for i in range(N):
+                circuit.Rx(x_angle, i)
+            for edge_list in color_edges:
+                for a, b in edge_list:
+                    circuit.ZZPhase(zz_angle, a, b)
+        return
+
+    pending_x = None
+    for x_angle, zz_angle in layer_angles:
+        merged_x = x_angle if pending_x is None else pending_x + x_angle
+        for i in range(N):
+            circuit.Rx(merged_x, i)
+        for edge_list in color_edges:
+            for a, b in edge_list:
+                circuit.ZZPhase(zz_angle, a, b)
+        pending_x = x_angle
+    for i in range(N):
+        circuit.Rx(pending_x, i)
 
 
 def build_quench_circuit(N, color_edges, steps, dt, h_field, J, mirror=True,
@@ -31,8 +82,8 @@ def build_quench_circuit(N, color_edges, steps, dt, h_field, J, mirror=True,
     """
     theta_x = -2 * h_field * dt
     theta_zz = -2 * J * dt
-    half_x_halfturns = (theta_x / 2 if mirror else theta_x) / math.pi
-    zz_halfturns = theta_zz / math.pi
+    x_angle = (theta_x / 2 if mirror else theta_x) / math.pi
+    zz_angle = theta_zz / math.pi
 
     circuit = Circuit(N, N)
 
@@ -41,15 +92,7 @@ def build_quench_circuit(N, color_edges, steps, dt, h_field, J, mirror=True,
             if bit == '1':
                 circuit.X(i)
 
-    for _ in range(steps):
-        for i in range(N):
-            circuit.Rx(half_x_halfturns, i)
-        for edge_list in color_edges:
-            for a, b in edge_list:
-                circuit.ZZPhase(zz_halfturns, a, b)
-        if mirror:
-            for i in range(N):
-                circuit.Rx(half_x_halfturns, i)
+    _append_trotter_layers(circuit, N, color_edges, [(x_angle, zz_angle)] * steps, mirror)
 
     circuit.measure_all()
     return circuit
@@ -93,13 +136,16 @@ def build_adiabatic_circuit(N, color_edges, ramp_steps, dt, h_target, J, h_init,
     of h and J with the sweep fraction s_ramp = step/ramp_steps), but as a
     single fully-unrolled pytket Circuit -- unlike build_quench_circuit,
     each layer's angles are recomputed per step since h_eff/J_eff vary
-    across the ramp rather than staying fixed.
+    across the ramp rather than staying fixed. Boundary Rx fusion (see
+    _append_trotter_layers) still applies even though the angle changes
+    step to step -- Rx(a)*Rx(b) = Rx(a+b) regardless of whether a == b.
     """
     circuit = Circuit(N, N)
 
     for i in range(N):
         circuit.H(i)
 
+    layer_angles = []
     for step in range(1, ramp_steps + 1):
         s_ramp = step / ramp_steps
         h_eff = (1 - s_ramp) * h_init + s_ramp * h_target
@@ -107,17 +153,11 @@ def build_adiabatic_circuit(N, color_edges, ramp_steps, dt, h_target, J, h_init,
 
         theta_x = -2 * h_eff * dt
         theta_zz = -2 * J_eff * dt
-        half_x_halfturns = (theta_x / 2 if mirror else theta_x) / math.pi
-        zz_halfturns = theta_zz / math.pi
+        x_angle = (theta_x / 2 if mirror else theta_x) / math.pi
+        zz_angle = theta_zz / math.pi
+        layer_angles.append((x_angle, zz_angle))
 
-        for i in range(N):
-            circuit.Rx(half_x_halfturns, i)
-        for edge_list in color_edges:
-            for a, b in edge_list:
-                circuit.ZZPhase(zz_halfturns, a, b)
-        if mirror:
-            for i in range(N):
-                circuit.Rx(half_x_halfturns, i)
+    _append_trotter_layers(circuit, N, color_edges, layer_angles, mirror)
 
     circuit.measure_all()
     return circuit

@@ -146,7 +146,8 @@ def plot_fixed_hamiltonian_evolution(h_values, evolution_results, ed_results, sa
     return fig
 
 
-def plot_h2_vs_ed_time(h_values, time_series_data, save_dir=None, saved_at=None):
+def plot_h2_vs_ed_time(h_values, time_series_data, save_dir=None, saved_at=None,
+                        filename="h2_vs_ed_time.png"):
     """<Z> and <Zi Zi+1> vs. time for the H2 emulator quench, one row per h/J,
     with the ED exact evolution as a continuous reference curve.
 
@@ -187,7 +188,7 @@ def plot_h2_vs_ed_time(h_values, time_series_data, save_dir=None, saved_at=None)
         title += f'\nrun: {saved_at}'
     fig.suptitle(title, fontsize=10)
 
-    _finalize(fig, 'h2_vs_ed_time.png', save_dir)
+    _finalize(fig, filename, save_dir)
     return fig
 
 
@@ -245,7 +246,8 @@ def plot_h2_phase_transition(h_values, h2_data, ed_results, save_dir=None, saved
     return fig
 
 
-def plot_vqe_convergence(h_values, vqe_data, ed_results, save_dir=None, saved_at=None):
+def plot_vqe_convergence(h_values, vqe_data, ed_results, save_dir=None, saved_at=None,
+                          filename="vqe_convergence.png"):
     """VQE energy vs. COBYLA iteration, one subplot per h/J target, with
     the ED ground energy as a horizontal reference line.
 
@@ -279,5 +281,5 @@ def plot_vqe_convergence(h_values, vqe_data, ed_results, save_dir=None, saved_at
         title += f'\nrun: {saved_at}'
     fig.suptitle(title, fontsize=10)
 
-    _finalize(fig, 'vqe_convergence.png', save_dir)
+    _finalize(fig, filename, save_dir)
     return fig
