@@ -55,8 +55,21 @@ def submit_quench_job(N, h_field, J, dt, steps, n_shots, device_name="H2-1LE",
     )
 
     backend_config = qnx.QuantinuumConfig(device_name=device_name)
-    results = qnx.execute(
+    # Our circuit is built from Rx/ZZPhase; H2's native gateset doesn't
+    # include a raw Rx (it wants Rz/PhasedX/ZZPhase/...), so it must be
+    # rebased via a compile job before execute() will accept it. Compile
+    # jobs are classical (tket passes run on Nexus, not the QPU/emulator)
+    # and don't cost hardware quota, unlike execute().
+    compiled_refs = qnx.compile(
         programs=[circuit_ref],
+        backend_config=backend_config,
+        name=f"{job_name}-compile",
+        project=project,
+    )
+    compiled_ref = compiled_refs[0]
+
+    results = qnx.execute(
+        programs=[compiled_ref],
         n_shots=[n_shots],
         backend_config=backend_config,
         name=job_name,
@@ -69,6 +82,7 @@ def submit_quench_job(N, h_field, J, dt, steps, n_shots, device_name="H2-1LE",
     return {
         "bitstrings": bitstrings,
         "circuit_ref_id": str(circuit_ref.id),
+        "compiled_circuit_ref_id": str(compiled_ref.id),
         "job_name": job_name,
         "project_name": project_name,
         "device_name": device_name,
