@@ -52,6 +52,10 @@ quantathon-challenge3/
 │   ├── tket_circuit.py                ← Circuitos para hardware (pytket): quench (ZZPhase), barrido adiabático y ansatz HEA para VQE
 │   │                                     (con fusión de puertas Rx en los bordes de capa Trotter -- ver Metodología)
 │   ├── qnexus_backend.py              ← Envío/ejecución de circuitos pytket en Quantinuum vía qnexus (quench, adiabático, batch VQE)
+│   │                                     -- consume cuota; usar para el emulador H2-1E con ruido real, hardware H2-1, o la corrida final de confirmación
+│   ├── local_emulator_backend.py      ← Misma interfaz que qnexus_backend.py pero contra el emulador H2-1LE vía pytket-quantinuum + pytket-pecos,
+│   │                                     ejecutado localmente (sin login, sin red, sin cuota) -- ver Metodología: por qué es la MISMA computación
+│   ├── shot_observables.py            ← bitstrings_to_observables / bootstrap_observable_errors, compartido por ambos backends H2
 │   ├── vqe.py                         ← Búsqueda del estado fundamental por VQE (ansatz hardware-efficient + COBYLA) contra el emulador H2
 │   ├── trotter_simulation.py          ← Propagación del statevector (barrido adiabático y quench)
 │   ├── sweep_schedule.py              ← Lógica de número de pasos para el barrido adiabático
@@ -175,6 +179,21 @@ transiciones diabáticas cerca de `h/J=1` que sí afecta a
 `load_last_run()` recupera los últimos resultados guardados (quench,
 adiabático y VQE, crudos y procesados) sin gastar cuota.
 
+**Ejecución local (gratis, sin cuota) — `--local`:** las tres funciones
+aceptan `local=True` (o el flag `--local` combinado con cualquiera de los
+anteriores, p. ej. `python src/run_h2_emulator.py --phase-transition
+--local`), que las redirige a `local_emulator_backend.py` en vez de
+`qnexus_backend.py`. H2-1LE es emulación exacta de vector de estado sin
+ningún modelo de ruido físico — solo ruido de muestreo (shot noise); ver
+la nota de Metodología más abajo — así que correr localmente vía
+`pytket-quantinuum`+`pytket-pecos` (`pip install
+"pytket-quantinuum[pecos]"`) da exactamente la misma computación que
+enviarla por qnexus, sin login, sin espera de cola y sin costo. Los
+resultados se guardan bajo un sufijo `_local` en `data/` y `figures/` para
+no sobrescribir nunca una corrida real de qnexus. Pensado para iterar
+rápido y gratis sobre parámetros (pasos de Trotter, dt, shots) antes de
+gastar cuota confirmando una vez en qnexus.
+
 ### Ejecución por notebooks (desarrollo interactivo)
 
 ```bash
@@ -233,12 +252,35 @@ jupyter notebook notebooks/
   lo cual no aplica directamente aquí (TFIM ya es a primeros vecinos, sin
   red de SWAPs), pero la misma identidad de fusión de rotaciones adyacentes
   de un qubit sí se traslada directamente a esta capa Trotter simetrizada.
+- **H2-1LE es emulación exacta de vector de estado, no "sin ruido de
+  leakage":** la documentación de Quantinuum es explícita — *"Emulator
+  targets ending with LE enable noiseless (state-vector) emulation, which
+  means that only shot-noise is included in the job result."* Sin modelo
+  de ruido físico alguno (ni de compuerta, ni de leakage, ni de medición),
+  solo ruido de muestreo finito. Por eso `local_emulator_backend.py`
+  (pytket-quantinuum + pytket-pecos, corriendo en esta máquina) da
+  exactamente la misma física que enviar el circuito por `qnexus` al mismo
+  H2-1LE — permitiendo iterar gratis sobre parámetros con la certeza de
+  que el resultado final por qnexus será equivalente.
 
 ### Fase 3: Comparación y análisis de error
 
 - Métrica: desviación relativa |⟨O⟩_quantum − ⟨O⟩_ED| / |⟨O⟩_ED|
 - **Objetivo:** < 5% para N = 8 sin ruido
 - Documentar error sistemático de Trotter vs. error estocástico de hardware
+- **Caso de estudio — punto crítico h/J=1 en el barrido adiabático de H2:**
+  con una rampa de longitud fija por h/J (`config.H2_ADIABATIC_MAX_STEPS`),
+  h/J=1 mostraba un sesgo sistemático de ⟨ZᵢZᵢ₊₁⟩ (~6.5% frente a ED,
+  confirmado a 14-17σ con 20 000 shots gratis vía el backend local — nada
+  que ver con ruido de muestreo). Un experimento aislando resolución
+  Trotter (`dt`) de tiempo total de rampa (`T = pasos·dt`) — barato de
+  hacer localmente — mostró que afinar `dt` a `T` fijo apenas cambiaba el
+  sesgo, mientras que duplicar `T` a `dt` fijo lo redujo de ~6.5% a ~2.1%:
+  ralentización crítica de manual — el teorema adiabático exige más
+  *tiempo* según se cierra el gap en `h/J=1`, no más resolución temporal.
+  `config.H2_ADIABATIC_CRITICAL_TIME_FACTOR` implementa esto: h/J=1 usa
+  `H2_ADIABATIC_MAX_STEPS · H2_ADIABATIC_CRITICAL_TIME_FACTOR` pasos al
+  mismo `dt` que el resto de los objetivos, no un `dt` más fino.
 
 ---
 
