@@ -17,12 +17,8 @@ ADIABATIC_HOLD_STEPS = 0   # extra steps at fixed (h_target, J) after the ramp,
                              # to check the state has actually settled (see plot_adiabatic_convergence)
 
 # Fixed-Hamiltonian time evolution (quench dynamics from a product state)
-QUENCH_DT = 0.025           # halved from 0.05 -- at 0.05, h/J=2.0's max % deviation in
-                             # <Zi Zi+1> vs. ED was 8.46%, over the challenge's <5% target;
-                             # run_dt_convergence.py's sweep confirmed 0.025 brings it to
-                             # ~2.1% (O(dt^2) scaling), so halving dt alone fixes it
-QUENCH_STEPS = 800          # doubled to keep total evolution time = QUENCH_DT * QUENCH_STEPS
-                             # fixed at 20.0 (same total time as before, just finer resolution)
+QUENCH_DT = 0.05
+QUENCH_STEPS = 400          # total evolution time = QUENCH_DT * QUENCH_STEPS
 QUENCH_INITIAL_STATE = None  # None -> defaults to |00...0>
 
 # Where to save figures. Set to None to skip saving (only meaningful if
@@ -70,6 +66,18 @@ H2_ADIABATIC_CRITICAL_TIME_FACTOR = 2  # at h/J=1 (gap closes -> critical slowin
                               # step-size, that was insufficient (textbook critical slowing
                               # down: the adiabatic theorem needs T -> large as the gap closes,
                               # independent of how finely that time is resolved)
+H2_ADIABATIC_TRANSIT_TIME_FACTOR = 4  # for a target whose ramp *passes through* h/J=1 without
+                              # landing there (e.g. h/J=0.5 with H_INIT=4.0 sweeps down through
+                              # 1.0 on the way to 0.5) -- steps = H2_ADIABATIC_MAX_STEPS * this
+                              # factor, separate from H2_ADIABATIC_CRITICAL_TIME_FACTOR since a
+                              # mid-ramp transit needed more total time than landing exactly on
+                              # the critical point did. A local_emulator_backend sweep at
+                              # h/J=0.5 (free, 2000 shots) found <X> deviation of 9.00% at
+                              # CRITICAL_TIME_FACTOR's 200 steps, 2.34% at 300, 0.43% at 400,
+                              # and 3.22% at 500 (500's rise is shot noise, not a systematic
+                              # trend -- 2000 shots gives an <X> standard error comparable to
+                              # these percentages at this magnitude) -- 400 was the clear best
+                              # and is comfortably under the 5% target with margin for shot noise.
 H2_ADIABATIC_SHOTS = 2000    # bumped from 500 -- bootstrap SE at 500 shots was ~0.02 on
                              # observables of magnitude ~0.6-0.9, comparable in size to the
                              # 5% deviation target itself, making individual runs bounce

@@ -178,15 +178,13 @@ def run_phase_transition(local=False):
     theorem needs more *time* as the gap closes, not finer time-resolution.
 
     Any other target whose ramp *passes through* h/J=1 on the way from
-    H_INIT gets the same treatment, not just a target that lands exactly on
-    it -- see _crosses_critical below. With H_INIT=4.0, that's h/J=0.5 (the
-    ramp sweeps down through 1.0 before reaching 0.5) in addition to h/J=1.0
-    itself; h/J=2.0's ramp (4.0 -> 2.0) never crosses 1.0 so it keeps the
-    plain rate_ref-based step count. Confirmed empirically: at the
-    rate_ref-only step count, h/J=0.5's <X> was 21.6% off ED (Z/ZZ passable
-    but also elevated) while h/J=2.0 was within 0.5% on all three
-    observables -- consistent with mid-ramp critical transit, not just ramp
-    distance, being the limiting factor for h/J=0.5.
+    H_INIT gets a related but larger treatment (H2_ADIABATIC_TRANSIT_TIME_FACTOR,
+    not H2_ADIABATIC_CRITICAL_TIME_FACTOR) -- see _ramp_steps below. With
+    H_INIT=4.0, that's h/J=0.5 (the ramp sweeps down through 1.0 before
+    reaching 0.5) in addition to h/J=1.0 itself; h/J=2.0's ramp (4.0 -> 2.0)
+    never crosses 1.0 so it keeps the plain rate_ref-based step count. See
+    H2_ADIABATIC_TRANSIT_TIME_FACTOR's comment in config.py for the local
+    sweep that picked its value.
     """
     print("=" * 60)
     print(f"H2 ADIABATIC SWEEP (phase-transition signal, {config.H2_DEVICE_NAME}, "
@@ -215,24 +213,27 @@ def run_phase_transition(local=False):
     # treatment -- a linear ramp from H_INIT down to a target below 1 (e.g.
     # h/J=0.5, with H_INIT=4.0) passes *through* h/J=1 partway along the ramp,
     # at the same constant rate as the rest of the sweep. That transit needs
-    # the same longer-total-time treatment as landing on h/J=1 itself, not
-    # just the |Delta h|-based rate_ref scaling, which only accounts for
-    # total distance and not for slowing through the gapless point along the
-    # way. (Confirmed empirically: h/J=0.5's <X> was 21.6% off ED at the
-    # rate_ref-only step count -- H_INIT..h/J=0.5 crosses 1.0 -- while
-    # h/J=2.0, whose ramp from H_INIT never crosses 1.0, was within 0.5%.)
-    def _crosses_critical(h):
-        return min(config.H_INIT, h) <= config.J <= max(config.H_INIT, h)
-
-    ramp_steps_by_target = [
-        round(config.H2_ADIABATIC_MAX_STEPS * config.H2_ADIABATIC_CRITICAL_TIME_FACTOR)
-        if _crosses_critical(h)
-        else min(
+    # even *more* total time than landing on h/J=1 itself (see
+    # H2_ADIABATIC_TRANSIT_TIME_FACTOR's comment in config.py for the sweep
+    # that pinned this down): landing on h/J=1 only has to be adiabatic
+    # approaching the gapless point, while a target past it (h/J=0.5) has to
+    # stay adiabatic approaching AND leaving the gapless point within the
+    # same ramp. (Confirmed empirically: h/J=0.5's <X> was 21.6% off ED on
+    # the real qnexus run at the rate_ref-only step count, and still 9.00%
+    # at h/J=1's own 200-step treatment, dropping to 0.43% at 400 steps;
+    # h/J=2.0, whose ramp from H_INIT never crosses 1.0, was under 0.5% at
+    # the plain rate_ref-based count throughout.)
+    def _ramp_steps(h):
+        if h == config.J:
+            return round(config.H2_ADIABATIC_MAX_STEPS * config.H2_ADIABATIC_CRITICAL_TIME_FACTOR)
+        if min(config.H_INIT, h) <= config.J <= max(config.H_INIT, h):
+            return round(config.H2_ADIABATIC_MAX_STEPS * config.H2_ADIABATIC_TRANSIT_TIME_FACTOR)
+        return min(
             steps_for_target(h, config.H2_ADIABATIC_DT, config.H2_ADIABATIC_RATE_REF, h_init=config.H_INIT),
             config.H2_ADIABATIC_MAX_STEPS,
         )
-        for h in h_values
-    ]
+
+    ramp_steps_by_target = [_ramp_steps(h) for h in h_values]
     print(f"\nSubmitting N={config.H2_ADIABATIC_N}, h_init={config.H_INIT} -> "
           f"h_target/J in {h_values} (batched), dt={dt_by_target}, "
           f"ramp_steps={ramp_steps_by_target} (rate_ref={config.H2_ADIABATIC_RATE_REF}, "
