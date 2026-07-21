@@ -5,8 +5,9 @@ Builds the Trotterized TFIM quench circuit as a pytket Circuit, for
 submission to the Quantinuum H2 emulator via qnexus. This mirrors the
 Rx(theta/2)-Rzz(theta)-Rx(theta/2) layer from circuits.py used by the local
 Qiskit/statevector pipeline, but as a single fully-unrolled pytket Circuit
-(covering all Trotter steps) with a final Z-basis measurement, since
-qnexus/H2 execution returns measurement shots rather than a statevector.
+(covering all Trotter steps) with a final measurement in a chosen basis
+(Z or X), since qnexus/H2 execution returns measurement shots rather than a
+statevector.
 
 pytket's Circuit.Rx/Rz/ZZPhase take angles in half-turns (multiples of pi),
 not radians -- same convention as Qiskit's Operator would give for
@@ -70,15 +71,32 @@ def _append_trotter_layers(circuit, N, color_edges, layer_angles, mirror):
         circuit.Rx(pending_x, i)
 
 
+def _append_basis_measurement(circuit, N, basis):
+    """Rotate into `basis` ("z" or "x") and measure every qubit.
+
+    Hardware/emulator shots always come back as computational-basis (Z)
+    bits, so measuring X means rotating X-eigenstates onto the Z axis
+    first: H|+> = |0>, H|-> = |1>, so an H before measure_all() makes the
+    returned bit read out the X eigenvalue instead of Z.
+    """
+    if basis == "x":
+        for i in range(N):
+            circuit.H(i)
+    elif basis != "z":
+        raise ValueError(f"unknown measurement basis {basis!r}, expected 'z' or 'x'")
+    circuit.measure_all()
+
+
 def build_quench_circuit(N, color_edges, steps, dt, h_field, J, mirror=True,
-                          initial_state_label=None):
+                          initial_state_label=None, basis="z"):
     """Build a pytket Circuit implementing `steps` fixed-Hamiltonian Trotter
-    layers on N qubits, then measure every qubit in the Z basis.
+    layers on N qubits, then measure every qubit in the given basis.
 
     color_edges: list of edge-color groups (as from circuits.edge_coloring) --
     keeps the generated gate sequence consistent with the Qiskit version.
     initial_state_label: optional bitstring (e.g. "0110") prepared via X
     gates before the Trotter layers; defaults to |0...0>.
+    basis: "z" (default) or "x" -- see _append_basis_measurement.
     """
     theta_x = -2 * h_field * dt
     theta_zz = -2 * J * dt
@@ -94,7 +112,7 @@ def build_quench_circuit(N, color_edges, steps, dt, h_field, J, mirror=True,
 
     _append_trotter_layers(circuit, N, color_edges, [(x_angle, zz_angle)] * steps, mirror)
 
-    circuit.measure_all()
+    _append_basis_measurement(circuit, N, basis)
     return circuit
 
 
@@ -154,10 +172,11 @@ def build_hva_ansatz_circuit(N, color_edges, theta_zz, theta_x):
     return circuit
 
 
-def build_adiabatic_circuit(N, color_edges, ramp_steps, dt, h_target, J, h_init, mirror=True):
+def build_adiabatic_circuit(N, color_edges, ramp_steps, dt, h_target, J, h_init, mirror=True,
+                             basis="z"):
     """Build a pytket Circuit implementing an adiabatic ramp from h_init to
     h_target (J: 0 -> J) over `ramp_steps` fixed-length layers, starting
-    from |+...+>, then measure every qubit in the Z basis.
+    from |+...+>, then measure every qubit in the given basis.
 
     Mirrors trotter_simulation.run_adiabatic_exact's schedule (linear ramp
     of h and J with the sweep fraction s_ramp = step/ramp_steps), but as a
@@ -166,6 +185,7 @@ def build_adiabatic_circuit(N, color_edges, ramp_steps, dt, h_target, J, h_init,
     across the ramp rather than staying fixed. Boundary Rx fusion (see
     _append_trotter_layers) still applies even though the angle changes
     step to step -- Rx(a)*Rx(b) = Rx(a+b) regardless of whether a == b.
+    basis: "z" (default) or "x" -- see _append_basis_measurement.
     """
     circuit = Circuit(N, N)
 
@@ -186,5 +206,5 @@ def build_adiabatic_circuit(N, color_edges, ramp_steps, dt, h_target, J, h_init,
 
     _append_trotter_layers(circuit, N, color_edges, layer_angles, mirror)
 
-    circuit.measure_all()
+    _append_basis_measurement(circuit, N, basis)
     return circuit

@@ -1,19 +1,52 @@
 """
 config.py
 
-Centralized simulation parameters. 
+Centralized simulation parameters.
+
+MERGE NOTE: the two source versions of this project each used
+`N_SCALING_VALUES` for a different purpose:
+  - the "N-scaling breakdown" version used it as the 4..20 spin range for
+    run_n_scaling.py's Trotter-vs-ED scan.
+  - the "noisy emulation" version used it as a small (6,8,10) set of sizes
+    for run_ed.py's *observable* scaling comparison plot.
+That name collision is resolved here: `N_SCALING_VALUES` keeps its
+original 4..20 meaning (run_n_scaling.py), and the ED observable-scaling
+plot instead reuses `ED_EXTRA_N_VALUES` (config.N plus these extra sizes)
+so there's a single source of truth for "which extra N's does the ED
+baseline get checked at", used by both run_ed.py's printed tables and its
+scaling plot.
 """
 
 N = 6                       # number of spins in the periodic chain
 J = 1.0                     # ZZ coupling strength
 H_VALUES = (0.5, 1.0, 2.0)  # target transverse fields to probe (critical point at h/J=1)
 
+# Extra system sizes checked by the ED baseline (run_ed.py), alongside N
+# above -- both for the printed comparison tables and for the observable-
+# scaling plot (plot_ed_scaling). Doesn't affect any other stage --
+# adiabatic/quench/dt_convergence/n_scaling still run at N only.
+ED_EXTRA_N_VALUES = (8, 10)  # Si quieren más iteraciones, metanle elementos a esta tupla
+
+# System sizes for the ED wall-clock *runtime* scaling benchmark
+# (run_ed.py) -- separate from ED_EXTRA_N_VALUES above since this one
+# costs real wall time (it actually runs ed_baseline once per N to time
+# it) rather than being "free" extra table rows. Kept modest since
+# pauli_ops.py builds every operator sparse in this merged codebase (see
+# that module's docstring) -- this benchmark will therefore run faster,
+# and the classical wall will sit further out, than it did against the
+# original dense-Pauli-operator implementation; raise these if your
+# machine has time/RAM to spare and you want to push the wall out further.
+N_RUNTIME_SCALING_VALUES = (6, 8, 10, 12)
+N_RUNTIME_SCALING_EXTRAPOLATE_TO = 20  # plot_ed_runtime_scaling fits the measured points and
+                             # projects (dashed, clearly marked "not run") out to this N, to
+                             # make the "where classical still wins" wall visually concrete.
+
 H_INIT = 4.0                # starting transverse field for adiabatic sweeps (deep paramagnetic)
 
 # Adiabatic sweep
 ADIABATIC_DT = 0.02
 ADIABATIC_RATE_REF = 0.022   # target |dh/dt|, sets sweep duration per h_target
-ADIABATIC_HOLD_STEPS = 0   # extra steps at fixed (h_target, J) after the ramp,
+ADIABATIC_HOLD_STEPS = 0    # extra steps at fixed (h_target, J) after the ramp,
                              # to check the state has actually settled (see plot_adiabatic_convergence)
 
 # Fixed-Hamiltonian time evolution (quench dynamics from a product state)
@@ -25,11 +58,58 @@ QUENCH_INITIAL_STATE = None  # None -> defaults to |00...0>
 # your backend is interactive and plt.show() actually opens a window).
 PLOT_SAVE_DIR = "figures"
 
+# System-size ("does it break down for many spins?") scan -- the 4..20
+# spin Trotter-vs-ED breakdown study (run_n_scaling.py). N_SCALING_VALUES
+# sets the range probed; the dense ED time-evolution reference
+# (exact_diagonalization.ed_time_evolution_exact, which builds a full
+# 2^N x 2^N dense matrix) is only requested up to N_SCALING_ED_MAX, since
+# it becomes memory/time-prohibitive well before N=20 -- that cutoff is
+# itself part of what the scan is meant to show.
+N_SCALING_VALUES = tuple(range(4, 21, 2))    # 4, 6, 8, ..., 20
+N_SCALING_ED_MAX = 12                        # dense ED reference only up to this N as a
+                                              # starting point -- run_n_scaling.py also
+                                              # catches MemoryError per-N and skips ED past
+                                              # whatever this machine can actually hold,
+                                              # since the real ceiling is RAM-dependent
+                                              # (dense eigh on a 2^14 x 2^14 matrix already
+                                              # raised MemoryError on a 4GB test machine)
+                                              # Maximum N for the noisy H2 emulation in run_n_scaling.py. Set to None to use all N_SCALING_VALUES.
+N_SCALING_NOISY_MAX = 8   # or 20, etc.
+N_SCALING_H = 1.0                            # h/J probed at each N (critical point)
+N_SCALING_DT = 0.05
+N_SCALING_STEPS = 20                       #Modifiqué estos valores para el escalado, pero cambiar a gusto
+
+# Noisy-simulation section of run_n_scaling.py's table -- currently a
+# placeholder (run_noisy_stub()) until a QEC-encoded circuit exists. These
+# just set what the eventual real run would use. Note this project *does*
+# now have a real noisy H2 device reachable via qnexus (H2_DEVICE_NAME_NOISY
+# below, "H2-Emulator") -- the earlier placeholder referenced an invalid
+# device name ("H2-1E"), fixed here to reuse the same real device name.
+# What's still missing to make run_noisy_stub real is a QEC-encoded
+# circuit (see its docstring in run_n_scaling.py) -- noisy-device access
+# by itself doesn't answer the "does encoded error correction scale"
+# question that stub is a placeholder for.
+N_SCALING_NOISY_DEVICE = "H2-Emulator"
+N_SCALING_NOISY_SHOTS = 200 #Modifiqué estos valores para el escalado, pero cambiar a gusto
+
 # Quantinuum H2 emulator run (pytket circuit submitted via qnexus).
 # OFF by default: requires a live qnexus login and costs against a metered
 # usage quota. Flip to True only with explicit approval to spend quota.
 RUN_ON_H2_EMULATOR = True
 H2_DEVICE_NAME = "H2-1LE"    # H2 noiseless-leakage emulator (cheapest H2-family target)
+H2_DEVICE_NAME_NOISY = "H2-Emulator"  # H2's real noisy emulator counterpart to
+                             # H2_DEVICE_NAME -- carries Quantinuum's published noise_specs
+                             # (gate/SPAM/crosstalk/dephasing error rates), unlike H2-1LE's
+                             # exact noiseless state-vector emulation (shot noise only -- see
+                             # qnexus_backend.py's module docstring). NOTE: "H2-1E" (used in
+                             # earlier drafts of this project) is NOT a valid qnexus device --
+                             # confirmed against the live qnexus device catalog
+                             # (qnexus.devices.get_all()), which only exposes H1-1LE/H2-1LE
+                             # (noiseless) and H1-Emulator/H2-Emulator (noisy, with embedded
+                             # noise_specs) -- real H2-1/H2-1E hardware access isn't in this
+                             # account's catalog at all. H2-Emulator still runs Nexus-side,
+                             # reached the same way as H2_DEVICE_NAME via qnx.execute() --
+                             # gated by RUN_ON_H2_EMULATOR, costs the same qnexus quota.
 H2_PROJECT_NAME = "ftim-hackathon"
 H2_N = 4                     # small chain -- keep circuit width/cost modest
 H2_H_VALUES = (0.5, 1.0, 2.0)         # single point at criticality by default
@@ -66,6 +146,17 @@ H2_ADIABATIC_CRITICAL_TIME_FACTOR = 2  # at h/J=1 (gap closes -> critical slowin
                               # step-size, that was insufficient (textbook critical slowing
                               # down: the adiabatic theorem needs T -> large as the gap closes,
                               # independent of how finely that time is resolved)
+H2_ADIABATIC_TRANSIT_TIME_FACTOR = 4  # for a target whose ramp *passes through* h/J=1 without
+                              # landing there (e.g. h/J=0.5 with H_INIT=4.0 sweeps down through
+                              # 1.0 on the way to 0.5) -- steps = H2_ADIABATIC_MAX_STEPS * this
+                              # factor, separate from H2_ADIABATIC_CRITICAL_TIME_FACTOR since a
+                              # mid-ramp transit needed more total time than landing exactly on
+                              # the critical point did. A local_emulator_backend sweep at
+                              # h/J=0.5 (free, 2000 shots) found <X> deviation of 9.00% at
+                              # CRITICAL_TIME_FACTOR's 200 steps, 2.34% at 300, 0.43% at 400,
+                              # and 3.22% at 500 (500's rise is shot noise, not a systematic
+                              # trend) -- 400 was the clear best and is comfortably under the
+                              # 5% target with margin for shot noise.
 H2_ADIABATIC_SHOTS = 2000    # bumped from 500 -- bootstrap SE at 500 shots was ~0.02 on
                              # observables of magnitude ~0.6-0.9, comparable in size to the
                              # 5% deviation target itself, making individual runs bounce

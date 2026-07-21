@@ -5,6 +5,11 @@ All matplotlib figure generation, kept separate from the numerics so the
 simulation modules stay pure/testable and the plotting code can be swapped
 out (e.g. for a notebook, a dashboard, or headless batch runs) without
 touching physics code.
+
+UNIFIED VERSION:
+- Merges plotting.py and plotting_g.py.
+- Includes 3-panel H2 plots (Z, X, ZZ) from the _g version, robust to missing X data.
+- Includes N-scaling, ED-scaling, and runtime-scaling plots from both sides.
 """
 import os
 
@@ -39,6 +44,96 @@ def _finalize(fig, filename, save_dir):
     else:
         plt.close(fig)
 
+
+# =============================================================================
+#  ED SCALING PLOTS (from _g version)
+# =============================================================================
+
+def plot_ed_scaling(h_values, ed_results_by_N, save_dir=None, filename="ed_scaling.png"):
+    """<X>, <Z>_rms, and <Zi Zi+1> vs. h/J, one line per system size N --
+    the observable side of the scaling comparison (run_ed.py runs ED at
+    every N in config.N_SCALING_VALUES and passes them all here).
+
+    ed_results_by_N: dict N -> list of per-h dicts as returned by
+    exact_diagonalization.ed_baseline (each {'h', 'mz_rms', 'mx', 'mzz',
+    'energy'}).
+    """
+    fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(16, 4.5))
+
+    for N, ed_results in sorted(ed_results_by_N.items()):
+        x_vals = [r['mx'] for r in ed_results]
+        z_vals = [r['mz_rms'] for r in ed_results]
+        zz_vals = [r['mzz'] for r in ed_results]
+        ax1.plot(h_values, x_vals, '-o', markersize=7, label=f'N = {N}')
+        ax2.plot(h_values, z_vals, '-o', markersize=7, label=f'N = {N}')
+        ax3.plot(h_values, zz_vals, '-o', markersize=7, label=f'N = {N}')
+
+    for ax, ylabel, title in (
+        (ax1, r'$\langle X \rangle$', 'Magnetización en X'),
+        (ax2, r'$\langle Z \rangle$ (RMS por sitio)', 'Magnetización en Z'),
+        (ax3, r'$\langle Z_i Z_{i+1} \rangle$', 'Correlación ZZ'),
+    ):
+        ax.axvline(x=1.0, color='gray', linestyle=':', alpha=0.7, label='Crítico h/J=1')
+        ax.set_xlabel('h / J')
+        ax.set_ylabel(ylabel)
+        ax.set_title(title)
+        ax.grid(True, alpha=0.3)
+        ax.legend(fontsize=8)
+
+    fig.suptitle('ED ground-state observables vs. system size (classical baseline scaling)',
+                 fontsize=10)
+    _finalize(fig, filename, save_dir)
+    return fig
+
+
+def plot_ed_runtime_scaling(timings, extrapolate_to=None, save_dir=None,
+                             filename="ed_runtime_scaling.png"):
+    """Wall-clock ED cost (Hamiltonian build + eigsh, one h/J point) vs.
+    system size N, log-scale y-axis -- the "honest extrapolation: state
+    where classical methods still win" evidence (run_ed.py measures
+    `timings` at config.N_RUNTIME_SCALING_VALUES).
+
+    timings: list of {'N', 'dim', 'time_s'} dicts, all actually measured on
+    this machine -- see run_ed.py. If extrapolate_to is given (and exceeds
+    the largest measured N), a log-linear fit through the measured points
+    (exponential-growth assumption, consistent with the 2^N Hilbert space)
+    is projected out to it and plotted as a separate, clearly-labeled
+    dashed series -- never blended into the "measured" line, since it is
+    NOT an actual run.
+    """
+    N_vals = np.array([t['N'] for t in timings])
+    t_vals = np.array([t['time_s'] for t in timings])
+
+    fig, ax = plt.subplots(figsize=(8.5, 5.5))
+    ax.semilogy(N_vals, t_vals, 'o-', color='steelblue', markersize=8,
+                label='Measured (this machine)')
+
+    if extrapolate_to and extrapolate_to > N_vals.max():
+        fit_slope, fit_intercept = np.polyfit(N_vals, np.log(t_vals), 1)
+        N_ext = np.arange(N_vals.max(), extrapolate_to + 1)
+        t_ext = np.exp(fit_intercept + fit_slope * N_ext)
+        ax.semilogy(N_ext, t_ext, 'o--', color='indianred', markersize=6, alpha=0.7,
+                    label='Extrapolated (log-linear fit, NOT run)')
+
+    for seconds, label in ((60, '1 min'), (3600, '1 hour'), (86400, '1 day')):
+        if seconds >= t_vals.min():
+            ax.axhline(seconds, color='gray', linestyle=':', alpha=0.5, linewidth=1)
+            ax.annotate(label, xy=(N_vals.min(), seconds), xytext=(2, 2),
+                        textcoords='offset points', fontsize=8, color='gray')
+
+    ax.set_xlabel('N (number of spins)')
+    ax.set_ylabel('Wall-clock time (s, log scale)')
+    ax.set_title('Classical ED cost vs. system size (h/J = 1, this implementation)')
+    ax.set_xticks(N_vals if extrapolate_to is None else np.arange(N_vals.min(), extrapolate_to + 1, 2))
+    ax.grid(True, which='both', alpha=0.3)
+    ax.legend(fontsize=9)
+    _finalize(fig, filename, save_dir)
+    return fig
+
+
+# =============================================================================
+#  ADIABATIC & QUENCH PLOTS (identical in both versions)
+# =============================================================================
 
 def plot_adiabatic_convergence(h_values, trotter_data, ed_results, rate_ref, save_dir=None):
     """<Z>, <ZiZi+1>, <X> vs. sweep time, for each target h, with ED reference lines."""
@@ -180,24 +275,28 @@ def plot_fixed_hamiltonian_evolution(h_values, evolution_results, ed_results, sa
     return fig
 
 
+# =============================================================================
+#  H2 EMULATOR PLOTS (merged: _g version is the base, with 3 panels for X)
+# =============================================================================
+
 def plot_h2_vs_ed_time(h_values, time_series_data, save_dir=None, saved_at=None,
                         filename="h2_vs_ed_time.png"):
-    """<Z> and <Zi Zi+1> vs. time for the H2 emulator quench, one row per h/J,
-    with the ED exact evolution as a continuous reference curve.
+    """<Z>, <X>, and <Zi Zi+1> vs. time for the H2 emulator quench, one row
+    per h/J, with the ED exact evolution as a continuous reference curve.
 
-    time_series_data: dict h -> {'times', 'z_h2', 'z_err', 'mzz_h2',
-    'mzz_err', 'z_ed', 'mzz_ed'} (see run_h2_emulator.run()). z_err/mzz_err
-    are shot-noise standard errors (bootstrap over the raw measured shots --
-    see qnexus_backend.bootstrap_observable_errors), shown as error bars so
-    the hardware numbers aren't reported without a noise estimate alongside
-    them.
+    time_series_data: dict h -> {'times', 'z_h2', 'z_err', 'x_h2', 'x_err',
+    'mzz_h2', 'mzz_err', 'z_ed', 'x_ed', 'mzz_ed'} (see
+    run_h2_emulator.run()). *_err are shot-noise standard errors (bootstrap
+    over the raw measured shots), shown as error bars so the
+    hardware numbers aren't reported without a noise estimate alongside them.
     """
-    fig, axes = plt.subplots(len(h_values), 2, figsize=(12, 4 * len(h_values)))
+    fig, axes = plt.subplots(len(h_values), 3, figsize=(17, 4 * len(h_values)))
 
     for idx, h in enumerate(h_values):
         r = time_series_data[h]
+        row = axes[idx] if len(h_values) > 1 else axes
 
-        ax1 = axes[idx, 0] if len(h_values) > 1 else axes[0]
+        ax1 = row[0]
         ax1.plot(r['times'], r['z_ed'], 'r-', linewidth=2, label='ED (exact)')
         ax1.errorbar(r['times'], r['z_h2'], yerr=r['z_err'], fmt='bo', markersize=6,
                      capsize=4, label='H2 emulator')
@@ -207,15 +306,25 @@ def plot_h2_vs_ed_time(h_values, time_series_data, save_dir=None, saved_at=None,
         ax1.grid(True, alpha=0.3)
         ax1.legend(loc='best', fontsize=8)
 
-        ax2 = axes[idx, 1] if len(h_values) > 1 else axes[1]
-        ax2.plot(r['times'], r['mzz_ed'], 'r-', linewidth=2, label='ED (exact)')
-        ax2.errorbar(r['times'], r['mzz_h2'], yerr=r['mzz_err'], fmt='bo', markersize=6,
+        ax2 = row[1]
+        ax2.plot(r['times'], r['x_ed'], 'r-', linewidth=2, label='ED (exact)')
+        ax2.errorbar(r['times'], r['x_h2'], yerr=r['x_err'], fmt='go', markersize=6,
                      capsize=4, label='H2 emulator')
         ax2.set_xlabel('Time t')
-        ax2.set_ylabel(r'$\langle Z_i Z_{i+1} \rangle$')
+        ax2.set_ylabel(r'$\langle X \rangle$ (mean per site)')
         ax2.set_title(f'h/J = {h:.1f} (starting from |0...0>)')
         ax2.grid(True, alpha=0.3)
         ax2.legend(loc='best', fontsize=8)
+
+        ax3 = row[2]
+        ax3.plot(r['times'], r['mzz_ed'], 'r-', linewidth=2, label='ED (exact)')
+        ax3.errorbar(r['times'], r['mzz_h2'], yerr=r['mzz_err'], fmt='bo', markersize=6,
+                     capsize=4, label='H2 emulator')
+        ax3.set_xlabel('Time t')
+        ax3.set_ylabel(r'$\langle Z_i Z_{i+1} \rangle$')
+        ax3.set_title(f'h/J = {h:.1f} (starting from |0...0>)')
+        ax3.grid(True, alpha=0.3)
+        ax3.legend(loc='best', fontsize=8)
 
     title = 'Quantinuum H2 Emulator Quench vs. Exact Diagonalization (error bars: shot noise)'
     if saved_at:
@@ -228,24 +337,25 @@ def plot_h2_vs_ed_time(h_values, time_series_data, save_dir=None, saved_at=None,
 
 def plot_h2_phase_transition(h_values, h2_data, ed_results, save_dir=None, saved_at=None,
                               method_label="adiabatic", filename="h2_phase_transition.png"):
-    """<Z> and <Zi Zi+1> vs. h/J for an H2 ground-state-search protocol
+    """<Z>, <X>, and <Zi Zi+1> vs. h/J for an H2 ground-state-search protocol
     (adiabatic ramp or VQE), vs. the ED ground state -- the phase-transition
     signal (h/J=1 crossover) as reproduced on hardware, styled like
     plot_phase_transition.
 
-    h2_data: dict h -> {'z_h2', 'z_err', 'mzz_h2', 'mzz_err'} (see
-    run_h2_emulator.run_phase_transition()/run_vqe()). z_err/mzz_err are
-    shot-noise standard errors (qnexus_backend.bootstrap_observable_errors).
-
-    method_label/filename let callers distinguish which protocol produced
-    the data (e.g. "VQE" vs. the default "adiabatic") without duplicating
-    this function.
+    h2_data: dict h -> {'z_h2', 'z_err', 'x_h2', 'x_err', 'mzz_h2',
+    'mzz_err'} (see run_h2_emulator.run_phase_transition()/run_vqe()).
+    *_err are shot-noise standard errors.
+    h2_data entries without 'x_h2'/'x_err' (e.g. an older saved run_vqe() result)
+    fall back to NaN so the <X> panel just shows gaps rather than raising.
     """
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(11, 4.5))
+    fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(16, 4.5))
 
     z_h2 = [h2_data[h]['z_h2'] for h in h_values]
     z_err = [h2_data[h]['z_err'] for h in h_values]
     z_ed = [next(r['mz_rms'] for r in ed_results if r['h'] == h) for h in h_values]
+    x_h2 = [h2_data[h].get('x_h2', float('nan')) for h in h_values]
+    x_err = [h2_data[h].get('x_err', 0.0) for h in h_values]
+    x_ed = [next(r['mx'] for r in ed_results if r['h'] == h) for h in h_values]
     mzz_h2 = [h2_data[h]['mzz_h2'] for h in h_values]
     mzz_err = [h2_data[h]['mzz_err'] for h in h_values]
     mzz_ed = [next(r['mzz'] for r in ed_results if r['h'] == h) for h in h_values]
@@ -260,15 +370,25 @@ def plot_h2_phase_transition(h_values, h2_data, ed_results, save_dir=None, saved
     ax1.grid(True, alpha=0.3)
     ax1.legend()
 
-    ax2.errorbar(h_values, mzz_h2, yerr=mzz_err, fmt='bo', markersize=8, capsize=4,
+    ax2.errorbar(h_values, x_h2, yerr=x_err, fmt='go', markersize=8, capsize=4,
                  label=f'H2 emulator ({method_label})')
-    ax2.plot(h_values, mzz_ed, 'rs--', markersize=8, label='ED (ground state)')
+    ax2.plot(h_values, x_ed, 'rs--', markersize=8, label='ED (ground state)')
     ax2.axvline(x=1.0, color='gray', linestyle=':', alpha=0.7, label='Critical h/J=1')
     ax2.set_xlabel('Target h / J')
-    ax2.set_ylabel(r'$\langle Z_i Z_{i+1} \rangle$')
-    ax2.set_title('Quantum Phase Transition (H2 Emulator) — <Zi Zi+1>')
+    ax2.set_ylabel(r'$\langle X \rangle$')
+    ax2.set_title('Quantum Phase Transition (H2 Emulator) — <X>')
     ax2.grid(True, alpha=0.3)
     ax2.legend()
+
+    ax3.errorbar(h_values, mzz_h2, yerr=mzz_err, fmt='bo', markersize=8, capsize=4,
+                 label=f'H2 emulator ({method_label})')
+    ax3.plot(h_values, mzz_ed, 'rs--', markersize=8, label='ED (ground state)')
+    ax3.axvline(x=1.0, color='gray', linestyle=':', alpha=0.7, label='Critical h/J=1')
+    ax3.set_xlabel('Target h / J')
+    ax3.set_ylabel(r'$\langle Z_i Z_{i+1} \rangle$')
+    ax3.set_title('Quantum Phase Transition (H2 Emulator) — <Zi Zi+1>')
+    ax3.grid(True, alpha=0.3)
+    ax3.legend()
 
     method_title = method_label if method_label.isupper() else method_label.title()
     title = f'Quantinuum H2 {method_title} vs. Exact Diagonalization (error bars: shot noise)'
@@ -316,4 +436,71 @@ def plot_vqe_convergence(h_values, vqe_data, ed_results, save_dir=None, saved_at
     fig.suptitle(title, fontsize=10)
 
     _finalize(fig, filename, save_dir)
+    return fig
+
+
+# =============================================================================
+#  N-SCALING PLOT (from original version)
+# =============================================================================
+
+def plot_n_scaling(scaling_data, ed_max_N, save_dir=None):
+    """System-size ('does it break down for many spins?') scan: Trotter vs.
+    ED accuracy, circuit cost, and wall-clock runtime, all vs. N.
+
+    scaling_data: dict N -> {
+        'max_pct_z', 'max_pct_mzz'  (None where N > ed_max_N, i.e. no dense
+            ED reference was computed at that size),
+        'depth', 'gate_count'       (from the Trotter circuit, all N),
+        'trotter_runtime_s'         (wall-clock time for the Trotter run, all N),
+        'ed_runtime_s'              (wall-clock time for the ED reference, None above ed_max_N),
+    }
+
+    Two panels:
+      (1) Trotter error vs. ED (only where ED was computed) -- shows the
+          circuit stays accurate as N grows, for as long as ED can check it.
+      (2) circuit depth/gate count and wall-clock runtime (Trotter vs. ED)
+          vs. N, log-scale on the y-axis -- shows *where* cost actually
+          grows: gently for the Trotter circuit, exponentially for dense ED,
+          with a vertical line marking where the ED reference stops.
+    """
+    N_values = sorted(scaling_data.keys())
+    fig, (ax_err, ax_cost) = plt.subplots(1, 2, figsize=(13, 5))
+
+    # Panel 1: accuracy vs N (only where an ED reference exists)
+    ed_N = [N for N in N_values if scaling_data[N]['max_pct_z'] is not None]
+    if ed_N:
+        pct_z = [scaling_data[N]['max_pct_z'] for N in ed_N]
+        pct_mzz = [scaling_data[N]['max_pct_mzz'] for N in ed_N]
+        ax_err.plot(ed_N, pct_z, 'o-', label=r'Max % dev. $\langle Z \rangle$')
+        ax_err.plot(ed_N, pct_mzz, 's-', label=r'Max % dev. $\langle Z_i Z_{i+1} \rangle$')
+        ax_err.axhline(y=5.0, color='red', linestyle='--', alpha=0.6, label='5% challenge threshold')
+    ax_err.set_xlabel('N (number of spins)')
+    ax_err.set_ylabel('Max % deviation, Trotter vs. ED')
+    ax_err.set_title('Trotter Accuracy vs. System Size')
+    ax_err.grid(True, alpha=0.3)
+    ax_err.legend(fontsize=8)
+
+    # Panel 2: cost vs N, log-scale (circuit cost stays cheap; dense ED
+    # runtime/memory is what actually breaks down)
+    depth = [scaling_data[N]['depth'] for N in N_values]
+    gate_count = [scaling_data[N]['gate_count'] for N in N_values]
+    trot_time = [scaling_data[N]['trotter_runtime_s'] for N in N_values]
+
+    ax_cost.semilogy(N_values, depth, 'o-', label='Trotter circuit depth')
+    ax_cost.semilogy(N_values, gate_count, 's-', label='Trotter gate count')
+    ax_cost.semilogy(N_values, trot_time, '^-', label='Trotter runtime (s)')
+
+    ed_time_N = [N for N in N_values if scaling_data[N]['ed_runtime_s'] is not None]
+    if ed_time_N:
+        ed_time = [scaling_data[N]['ed_runtime_s'] for N in ed_time_N]
+        ax_cost.semilogy(ed_time_N, ed_time, 'v-', color='red', label='Dense ED runtime (s)')
+    ax_cost.axvline(x=ed_max_N, color='gray', linestyle=':', alpha=0.7,
+                     label=f'ED reference stops (N={ed_max_N})')
+    ax_cost.set_xlabel('N (number of spins)')
+    ax_cost.set_ylabel('Cost (log scale)')
+    ax_cost.set_title('Circuit Cost & Runtime vs. System Size')
+    ax_cost.grid(True, which='both', alpha=0.3)
+    ax_cost.legend(fontsize=8)
+
+    _finalize(fig, 'n_scaling.png', save_dir)
     return fig

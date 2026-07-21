@@ -44,7 +44,7 @@ Thumbs.db
 # Data outputs (keep structure, ignore large files)
 # Uncomment if data files are too large for git
 # data/*.npz
-# data/*.json
+data/*.json
 # figures/*.png
 # figures/*.pdf
 
