@@ -18,6 +18,9 @@ range the Trotter simulation is supposed to cover -- even though the
 every operator here sparse is what lets the classical bookkeeping
 (observable expectation values, and the ED reference where it's still
 used) actually reach N=20 instead of being the thing that "breaks down".
+This is also what run_ed.py's wall-clock runtime-scaling benchmark
+measures -- the sparse implementation pushes that classical wall further
+out than a dense np.kron implementation would.
 
 Caching note: get_pauli() and build_collective_observables() are the most
 called functions in the whole pipeline (every ED call and every time-step

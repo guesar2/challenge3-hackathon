@@ -40,14 +40,19 @@ A THIRD, separate question -- does *circuit-execution accuracy* degrade
 with N once real hardware noise (not just Trotter/dt error) is in play --
 is NOT answered by anything above, since run_trotter_fixed_hamiltonian is
 exact noiseless statevector evolution. That question needs the shot-based
-H2 execution path (tket_circuit.py + qnexus_backend.py, device_name=
-"H2-1E" or real hardware -- the default "H2-1LE" is noiseless except for
-shot noise, so it wouldn't show anything new here either) run at a QEC-
-encoded circuit, which doesn't exist in this project yet. Rather than
-silently skip it, run_noisy_stub() below prints/saves a clearly-labeled
-placeholder row per N so the table has the right shape ahead of time --
-see its docstring for exactly what to wire in once a QEC-encoded circuit
-path exists.
+H2 execution path (tket_circuit.py + qnexus_backend.py, with
+device_name=config.H2_DEVICE_NAME_NOISY -- the default H2_DEVICE_NAME is
+noiseless except for shot noise, so it wouldn't show anything new here
+either) run at a QEC-encoded circuit, which doesn't exist in this project
+yet. This project does now have a real noisy H2 device reachable via
+qnexus (see run_h2_emulator.py's `noisy=True` path) -- so device access is
+no longer the blocker it once was -- but that alone doesn't answer this
+N-scaling question, since it still needs a QEC-encoded circuit built at
+each N, not just a noisy device to submit an unencoded circuit to. Rather
+than silently skip it, run_noisy_stub() below prints/saves a clearly-
+labeled placeholder row per N so the table has the right shape ahead of
+time -- see its docstring for exactly what to wire in once a QEC-encoded
+circuit path exists.
 
 Standalone: `python run_n_scaling.py`. Computes its own ED baseline where
 feasible, so it can be checked in isolation like the other capstone
@@ -77,54 +82,127 @@ def _trotter_circuit_cost(N, dt, h, J):
     return layer.depth(), layer.size()
 
 
-def run_noisy_stub(N_values, device_name=None, shots=None):
-    """PLACEHOLDER -- not wired up yet. Returns one row per N with every
-    numeric field set to None and a status message, so the noisy-section
-    table has the right shape/columns now and can be filled in later
-    without changing the table format or any downstream code.
-
-    To make this real once a QEC-encoded circuit exists, replace the body
-    with something like:
-
-        from tket_circuit import build_quench_circuit   # or your QEC-encoded builder
-        from qnexus_backend import submit_quench_batch
-        from shot_observables import bitstrings_to_observables, bootstrap_observable_errors
-
-        for N in N_values:
-            batch = submit_quench_batch(N, h, J, dt, [steps], shots,
-                                         device_name=device_name, project_name=...)
-            z_rms, mzz = bitstrings_to_observables(batch[steps]["bitstrings"], N)
-            z_se, mzz_se = bootstrap_observable_errors(batch[steps]["bitstrings"], N)
-            # compare z_rms/mzz to the same ed_time_evolution_exact reference
-            # used for the classical Trotter rows, same max-%-deviation metric
-
-    Notes for when that happens:
-      - Every point costs metered qnexus quota (config.RUN_ON_H2_EMULATOR
-        gates this project's other qnexus calls for the same reason) --
-        keep the N range and shot count deliberately small, the same way
-        config.H2_N / config.H2_ADIABATIC_N are kept small elsewhere.
-      - device_name="H2-1E" (or real H2-1 hardware) is required for a
-        physical noise model; the default "H2-1LE" is noiseless except for
-        shot noise and would just reproduce the noiseless Trotter numbers
-        at higher cost.
-      - The accuracy metric should stay directly comparable to the
-        classical rows above: max % deviation vs. the same ed_time_evolution_exact
-        reference, at the same (h, dt, steps) config.N_SCALING_* uses.
+def run_noisy_stub(N_values, device_name=None, shots=None, max_N=None):
     """
+    REAL noisy H2 emulation using qnexus (no longer a stub).
+
+    Args:
+        N_values: iterable of system sizes to consider (will be filtered).
+        device_name: device name (default: config.N_SCALING_NOISY_DEVICE).
+        shots: number of shots (default: config.N_SCALING_NOISY_SHOTS).
+        max_N: optional maximum N to run. If None, uses
+               config.N_SCALING_NOISY_MAX if present, otherwise 12.
+
+    Returns:
+        dict: for each N actually run (N <= max_N), a dict with results.
+              If RUN_ON_H2_EMULATOR is False, returns a "SKIPPED" status
+              for all N (without submitting anything).
+    """
+    # Determine max_N: argument > config > default
+    if max_N is None:
+        max_N = getattr(config, 'N_SCALING_NOISY_MAX', 12)
+
+    # Filter N_values to those <= max_N
+    N_list = [N for N in N_values if N <= max_N]
+    if not N_list:
+        print(f"[Noisy stub] No N values <= {max_N}. Skipping noisy emulation.")
+        return {}
+
+    if not config.RUN_ON_H2_EMULATOR:
+        print("\n[Noisy stub] Skipped (config.RUN_ON_H2_EMULATOR = False).")
+        return {
+            N: {
+                'device': device_name or config.N_SCALING_NOISY_DEVICE,
+                'shots': shots or config.N_SCALING_NOISY_SHOTS,
+                'max_pct_z': None,
+                'max_pct_mzz': None,
+                'runtime_s': None,
+                'status': 'SKIPPED (RUN_ON_H2_EMULATOR=False)',
+            }
+            for N in N_list
+        }
+
+    import time
+    from qnexus_backend import submit_quench_batch
+    from shot_observables import bitstrings_to_observables
+    from exact_diagonalization import ed_time_evolution_exact
+
     device_name = device_name or config.N_SCALING_NOISY_DEVICE
     shots = shots or config.N_SCALING_NOISY_SHOTS
-    return {
-        N: {
-            'device': device_name,
-            'shots': shots,
-            'max_pct_z': None,
-            'max_pct_mzz': None,
-            'runtime_s': None,
-            'status': 'PENDING -- requires QEC-encoded circuit (not implemented yet)',
-        }
-        for N in N_values
-    }
+    h = config.N_SCALING_H
+    J = config.J
+    dt = config.N_SCALING_DT
+    steps = config.N_SCALING_STEPS
 
+    print("\n" + "=" * 70)
+    print(f"RUNNING REAL NOISY H2 EMULATION on {device_name}")
+    print(f"(h/J = {h:.1f}, dt = {dt:.3f}, steps = {steps}, shots = {shots})")
+    print(f"Max N = {max_N} (filtered: {N_list})")
+    print("=" * 70)
+
+    results = {}
+    for N in N_list:
+        print(f"\n>>> Submitting N = {N} ...")
+        initial_state = '0' * N
+        step_counts = [steps]  # only the final step
+
+        try:
+            t0 = time.perf_counter()
+            batch = submit_quench_batch(
+                N, h, J, dt, step_counts, shots,
+                device_name=device_name,
+                project_name=config.H2_PROJECT_NAME,
+                initial_state_label=initial_state,
+            )
+            runtime_s = time.perf_counter() - t0
+
+            bitstrings = batch[steps]["bitstrings"]
+            z_rms, mzz = bitstrings_to_observables(bitstrings, N)
+
+            # ED reference (only if N allows it)
+            try:
+                _, z_ed, mzz_ed, _ = ed_time_evolution_exact(
+                    N, h, J, dt, steps, initial_state
+                )
+                ed_z_final = z_ed[-1]
+                ed_mzz_final = mzz_ed[-1]
+
+                pct_z = (abs(z_rms - ed_z_final) / max(abs(ed_z_final), 1e-12)) * 100
+                pct_mzz = (abs(mzz - ed_mzz_final) / max(abs(ed_mzz_final), 1e-12)) * 100
+                status = "Completed"
+            except MemoryError:
+                pct_z = None
+                pct_mzz = None
+                status = "ED skipped (MemoryError)"
+                print(f"  [WARN] ED reference not available for N={N} (too large).")
+
+            results[N] = {
+                'device': device_name,
+                'shots': shots,
+                'max_pct_z': pct_z,
+                'max_pct_mzz': pct_mzz,
+                'runtime_s': runtime_s,
+                'status': status,
+            }
+            if status == "Completed":
+                print(f"  ✅ <Z> dev = {pct_z:.2f}%, <ZZ> dev = {pct_mzz:.2f}%  (runtime {runtime_s:.2f}s)")
+            else:
+                print(f"  ⚠️  {status}")
+
+        except Exception as e:
+            import traceback
+            traceback.print_exc()  # Imprime el traceback completo en la consola
+            results[N] = {
+                'device': device_name,
+                'shots': shots,
+                'max_pct_z': None,
+                'max_pct_mzz': None,
+                'runtime_s': None,
+                'status': f'ERROR: {e}',
+            }
+            print(f"  ❌ Submission failed for N={N}: {e}")
+
+    return results
 
 def _print_scaling_table(scaling_data, ed_max_N):
     N_values = sorted(scaling_data.keys())
@@ -143,15 +221,15 @@ def _print_scaling_table(scaling_data, ed_max_N):
 
 def _print_noisy_table(noisy_data):
     N_values = sorted(noisy_data.keys())
-    print(f"\n{'N':>4} | {'Device':>8} | {'Shots':>6} | {'%dev <Z>':>9} | "
+    print(f"\n{'N':>4} | {'Device':>12} | {'Shots':>6} | {'%dev <Z>':>9} | "
           f"{'%dev <ZZ>':>10} | {'Runtime(s)':>10} | Status")
-    print("-" * 90)
+    print("-" * 95)
     for N in N_values:
         r = noisy_data[N]
         pz = f"{r['max_pct_z']:.3f}" if r['max_pct_z'] is not None else "-"
         pzz = f"{r['max_pct_mzz']:.3f}" if r['max_pct_mzz'] is not None else "-"
         rt = f"{r['runtime_s']:.3f}" if r['runtime_s'] is not None else "-"
-        print(f"{N:>4} | {r['device']:>8} | {r['shots']:>6} | {pz:>9} | {pzz:>10} | {rt:>10} | {r['status']}")
+        print(f"{N:>4} | {r['device']:>12} | {r['shots']:>6} | {pz:>9} | {pzz:>10} | {rt:>10} | {r['status']}")
 
 
 def run():
@@ -213,6 +291,7 @@ def run():
 
     noisy_data = run_noisy_stub(config.N_SCALING_VALUES)
 
+
     plot_n_scaling(scaling_data, ed_max_N, save_dir=config.PLOT_SAVE_DIR)
 
     print("\n" + "=" * 60)
@@ -226,7 +305,10 @@ def run():
     _print_noisy_table(noisy_data)
     print("\nNote: the noisy section above is a placeholder. It requires a QEC-encoded")
     print("circuit that doesn't exist in this project yet -- see run_noisy_stub()'s")
-    print("docstring in run_n_scaling.py for exactly what to wire in once it does.")
+    print("docstring in run_n_scaling.py for exactly what to wire in once it does. A")
+    print("real noisy H2 device (config.H2_DEVICE_NAME_NOISY) is available via")
+    print("run_h2_emulator.py's noisy=True path, but that alone doesn't fill this table --")
+    print("it still needs a QEC-encoded circuit built at each N, not just device access.")
 
     print("\nSummary:")
     print("  - Circuit depth/gate count grow only mildly with N (local TFIM chain,")
