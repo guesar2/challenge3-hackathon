@@ -8,6 +8,12 @@ N = 6                       # number of spins in the periodic chain
 J = 1.0                     # ZZ coupling strength
 H_VALUES = (0.5, 1.0, 2.0)  # target transverse fields to probe (critical point at h/J=1)
 
+# Extra system sizes to show in the ED baseline (run_ed.py), alongside N
+# above. Doesn't affect any other stage -- adiabatic/quench/dt_convergence
+# still run at N only -- this just adds more printed baseline tables for
+# comparison (e.g. finite-size effects between N and these).
+ED_EXTRA_N_VALUES = (8,10) #Si quieren más iteraciones, metanle elementos a esta tupla
+
 H_INIT = 4.0                # starting transverse field for adiabatic sweeps (deep paramagnetic)
 
 # Adiabatic sweep
@@ -24,6 +30,34 @@ QUENCH_INITIAL_STATE = None  # None -> defaults to |00...0>
 # Where to save figures. Set to None to skip saving (only meaningful if
 # your backend is interactive and plt.show() actually opens a window).
 PLOT_SAVE_DIR = "figures"
+
+# System-size ("does it break down for many spins?") scan.
+# N_SCALING_VALUES sets the range probed by run_n_scaling.py; the dense ED
+# time-evolution reference (exact_diagonalization.ed_time_evolution_exact,
+# which builds a full 2^N x 2^N dense matrix) is only requested up to
+# N_SCALING_ED_MAX, since it becomes memory/time-prohibitive well before
+# N=20 -- that cutoff is itself part of what the scan is meant to show.
+N_SCALING_VALUES = tuple(range(4, 21, 2))   # 4, 6, 8, ..., 20
+N_SCALING_ED_MAX = 12                        # dense ED reference only up to this N as a
+                                              # starting point -- run_n_scaling.py also
+                                              # catches MemoryError per-N and skips ED past
+                                              # whatever this machine can actually hold,
+                                              # since the real ceiling is RAM-dependent
+                                              # (dense eigh on a 2^14 x 2^14 matrix already
+                                              # raised MemoryError on a 4GB test machine)
+N_SCALING_H = 1.0                            # h/J probed at each N (critical point)
+N_SCALING_DT = 0.05
+N_SCALING_STEPS = 100                        # kept modest -- N=20 alone takes minutes;
+                                              # raise if you have time/hardware to spare
+
+# Noisy-simulation section of run_n_scaling.py's table -- currently a
+# placeholder (run_noisy_stub()) until a QEC-encoded circuit exists. These
+# just set what the eventual real run would use: device_name="H2-1E" for
+# an actual physical noise model (the default "H2-1LE" elsewhere in this
+# project is noiseless except for shot noise, so it wouldn't show anything
+# new here), and a modest shot count since every point costs qnexus quota.
+N_SCALING_NOISY_DEVICE = "H2-1E"
+N_SCALING_NOISY_SHOTS = 500
 
 # Quantinuum H2 emulator run (pytket circuit submitted via qnexus).
 # OFF by default: requires a live qnexus login and costs against a metered

@@ -144,6 +144,69 @@ def plot_dt_convergence(h_values, dt_values, error_data, save_dir=None):
     return fig
 
 
+def plot_n_scaling(scaling_data, ed_max_N, save_dir=None):
+    """System-size ('does it break down for many spins?') scan: Trotter vs.
+    ED accuracy, circuit cost, and wall-clock runtime, all vs. N.
+
+    scaling_data: dict N -> {
+        'max_pct_z', 'max_pct_mzz'  (None where N > ed_max_N, i.e. no dense
+            ED reference was computed at that size),
+        'depth', 'gate_count'       (from the Trotter circuit, all N),
+        'trotter_runtime_s'         (wall-clock time for the Trotter run, all N),
+        'ed_runtime_s'              (wall-clock time for the ED reference, None above ed_max_N),
+    }
+
+    Two panels:
+      (1) Trotter error vs. ED (only where ED was computed) -- shows the
+          circuit stays accurate as N grows, for as long as ED can check it.
+      (2) circuit depth/gate count and wall-clock runtime (Trotter vs. ED)
+          vs. N, log-scale on the y-axis -- shows *where* cost actually
+          grows: gently for the Trotter circuit, exponentially for dense ED,
+          with a vertical line marking where the ED reference stops.
+    """
+    N_values = sorted(scaling_data.keys())
+    fig, (ax_err, ax_cost) = plt.subplots(1, 2, figsize=(13, 5))
+
+    # Panel 1: accuracy vs N (only where an ED reference exists)
+    ed_N = [N for N in N_values if scaling_data[N]['max_pct_z'] is not None]
+    if ed_N:
+        pct_z = [scaling_data[N]['max_pct_z'] for N in ed_N]
+        pct_mzz = [scaling_data[N]['max_pct_mzz'] for N in ed_N]
+        ax_err.plot(ed_N, pct_z, 'o-', label=r'Max % dev. $\langle Z \rangle$')
+        ax_err.plot(ed_N, pct_mzz, 's-', label=r'Max % dev. $\langle Z_i Z_{i+1} \rangle$')
+        ax_err.axhline(y=5.0, color='red', linestyle='--', alpha=0.6, label='5% challenge threshold')
+    ax_err.set_xlabel('N (number of spins)')
+    ax_err.set_ylabel('Max % deviation, Trotter vs. ED')
+    ax_err.set_title('Trotter Accuracy vs. System Size')
+    ax_err.grid(True, alpha=0.3)
+    ax_err.legend(fontsize=8)
+
+    # Panel 2: cost vs N, log-scale (circuit cost stays cheap; dense ED
+    # runtime/memory is what actually breaks down)
+    depth = [scaling_data[N]['depth'] for N in N_values]
+    gate_count = [scaling_data[N]['gate_count'] for N in N_values]
+    trot_time = [scaling_data[N]['trotter_runtime_s'] for N in N_values]
+
+    ax_cost.semilogy(N_values, depth, 'o-', label='Trotter circuit depth')
+    ax_cost.semilogy(N_values, gate_count, 's-', label='Trotter gate count')
+    ax_cost.semilogy(N_values, trot_time, '^-', label='Trotter runtime (s)')
+
+    ed_time_N = [N for N in N_values if scaling_data[N]['ed_runtime_s'] is not None]
+    if ed_time_N:
+        ed_time = [scaling_data[N]['ed_runtime_s'] for N in ed_time_N]
+        ax_cost.semilogy(ed_time_N, ed_time, 'v-', color='red', label='Dense ED runtime (s)')
+    ax_cost.axvline(x=ed_max_N, color='gray', linestyle=':', alpha=0.7,
+                     label=f'ED reference stops (N={ed_max_N})')
+    ax_cost.set_xlabel('N (number of spins)')
+    ax_cost.set_ylabel('Cost (log scale)')
+    ax_cost.set_title('Circuit Cost & Runtime vs. System Size')
+    ax_cost.grid(True, which='both', alpha=0.3)
+    ax_cost.legend(fontsize=8)
+
+    _finalize(fig, 'n_scaling.png', save_dir)
+    return fig
+
+
 def plot_fixed_hamiltonian_evolution(h_values, evolution_results, ed_results, save_dir=None):
     """<Z> and <ZiZi+1> vs. time for fixed-H evolution from a product state.
 

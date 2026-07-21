@@ -1,0 +1,170 @@
+{
+  "stage": "n_scaling",
+  "saved_at": "2026-07-21T04:20:23.825655+00:00",
+  "results": {
+    "J": 1.0,
+    "h": 1.0,
+    "dt": 0.05,
+    "steps": 100,
+    "N_values": [
+      4,
+      6,
+      8,
+      10,
+      12,
+      14,
+      16,
+      18,
+      20
+    ],
+    "ed_max_N": 12,
+    "scaling_data": {
+      "4": {
+        "depth": 4,
+        "gate_count": 12,
+        "trotter_runtime_s": 0.11873489990830421,
+        "ed_runtime_s": 0.00671589991543442,
+        "max_pct_z": 0.4000772095205259,
+        "max_pct_mzz": 0.85699584708123
+      },
+      "6": {
+        "depth": 4,
+        "gate_count": 18,
+        "trotter_runtime_s": 0.14021739992313087,
+        "ed_runtime_s": 0.014790800050832331,
+        "max_pct_z": 0.3730542914472756,
+        "max_pct_mzz": 0.6636300065299304
+      },
+      "8": {
+        "depth": 4,
+        "gate_count": 24,
+        "trotter_runtime_s": 0.21610970003530383,
+        "ed_runtime_s": 0.07371329993475229,
+        "max_pct_z": 0.4781573798490954,
+        "max_pct_mzz": 0.7776898502201831
+      },
+      "10": {
+        "depth": 4,
+        "gate_count": 30,
+        "trotter_runtime_s": 0.2966919000027701,
+        "ed_runtime_s": 0.8707882000599056,
+        "max_pct_z": 0.16343535615068466,
+        "max_pct_mzz": 0.26650324892101496
+      },
+      "12": {
+        "depth": 5,
+        "gate_count": 36,
+        "trotter_runtime_s": 0.46642099996097386,
+        "ed_runtime_s": 21.041954700020142,
+        "max_pct_z": 0.17578533749353867,
+        "max_pct_mzz": 0.26650324892123484
+      },
+      "14": {
+        "depth": 5,
+        "gate_count": 42,
+        "trotter_runtime_s": 1.0811220000032336,
+        "ed_runtime_s": null,
+        "max_pct_z": null,
+        "max_pct_mzz": null
+      },
+      "16": {
+        "depth": 5,
+        "gate_count": 48,
+        "trotter_runtime_s": 7.462347699911334,
+        "ed_runtime_s": null,
+        "max_pct_z": null,
+        "max_pct_mzz": null
+      },
+      "18": {
+        "depth": 5,
+        "gate_count": 54,
+        "trotter_runtime_s": 31.75850279990118,
+        "ed_runtime_s": null,
+        "max_pct_z": null,
+        "max_pct_mzz": null
+      },
+      "20": {
+        "depth": 5,
+        "gate_count": 60,
+        "trotter_runtime_s": 139.04967660002876,
+        "ed_runtime_s": null,
+        "max_pct_z": null,
+        "max_pct_mzz": null
+      }
+    },
+    "noisy_data": {
+      "4": {
+        "device": "H2-1E",
+        "shots": 500,
+        "max_pct_z": null,
+        "max_pct_mzz": null,
+        "runtime_s": null,
+        "status": "PENDING -- requires QEC-encoded circuit (not implemented yet)"
+      },
+      "6": {
+        "device": "H2-1E",
+        "shots": 500,
+        "max_pct_z": null,
+        "max_pct_mzz": null,
+        "runtime_s": null,
+        "status": "PENDING -- requires QEC-encoded circuit (not implemented yet)"
+      },
+      "8": {
+        "device": "H2-1E",
+        "shots": 500,
+        "max_pct_z": null,
+        "max_pct_mzz": null,
+        "runtime_s": null,
+        "status": "PENDING -- requires QEC-encoded circuit (not implemented yet)"
+      },
+      "10": {
+        "device": "H2-1E",
+        "shots": 500,
+        "max_pct_z": null,
+        "max_pct_mzz": null,
+        "runtime_s": null,
+        "status": "PENDING -- requires QEC-encoded circuit (not implemented yet)"
+      },
+      "12": {
+        "device": "H2-1E",
+        "shots": 500,
+        "max_pct_z": null,
+        "max_pct_mzz": null,
+        "runtime_s": null,
+        "status": "PENDING -- requires QEC-encoded circuit (not implemented yet)"
+      },
+      "14": {
+        "device": "H2-1E",
+        "shots": 500,
+        "max_pct_z": null,
+        "max_pct_mzz": null,
+        "runtime_s": null,
+        "status": "PENDING -- requires QEC-encoded circuit (not implemented yet)"
+      },
+      "16": {
+        "device": "H2-1E",
+        "shots": 500,
+        "max_pct_z": null,
+        "max_pct_mzz": null,
+        "runtime_s": null,
+        "status": "PENDING -- requires QEC-encoded circuit (not implemented yet)"
+      },
+      "18": {
+        "device": "H2-1E",
+        "shots": 500,
+        "max_pct_z": null,
+        "max_pct_mzz": null,
+        "runtime_s": null,
+        "status": "PENDING -- requires QEC-encoded circuit (not implemented yet)"
+      },
+      "20": {
+        "device": "H2-1E",
+        "shots": 500,
+        "max_pct_z": null,
+        "max_pct_mzz": null,
+        "runtime_s": null,
+        "status": "PENDING -- requires QEC-encoded circuit (not implemented yet)"
+      }
+    }
+  }
+}
