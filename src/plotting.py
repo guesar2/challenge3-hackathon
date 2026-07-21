@@ -52,7 +52,7 @@ def _finalize(fig, filename, save_dir):
 def plot_ed_scaling(h_values, ed_results_by_N, save_dir=None, filename="ed_scaling.png"):
     """<X>, <Z>_rms, and <Zi Zi+1> vs. h/J, one line per system size N --
     the observable side of the scaling comparison (run_ed.py runs ED at
-    every N in config.N_SCALING_VALUES and passes them all here).
+    every N in config.ED_EXTRA_N_VALUES and passes them all here).
 
     ed_results_by_N: dict N -> list of per-h dicts as returned by
     exact_diagonalization.ed_baseline (each {'h', 'mz_rms', 'mx', 'mzz',
@@ -287,7 +287,8 @@ def plot_h2_vs_ed_time(h_values, time_series_data, save_dir=None, saved_at=None,
     time_series_data: dict h -> {'times', 'z_h2', 'z_err', 'x_h2', 'x_err',
     'mzz_h2', 'mzz_err', 'z_ed', 'x_ed', 'mzz_ed'} (see
     run_h2_emulator.run()). *_err are shot-noise standard errors (bootstrap
-    over the raw measured shots), shown as error bars so the
+    over the raw measured shots -- see
+    shot_observables.bootstrap_observable_errors), shown as error bars so the
     hardware numbers aren't reported without a noise estimate alongside them.
     """
     fig, axes = plt.subplots(len(h_values), 3, figsize=(17, 4 * len(h_values)))
@@ -344,9 +345,14 @@ def plot_h2_phase_transition(h_values, h2_data, ed_results, save_dir=None, saved
 
     h2_data: dict h -> {'z_h2', 'z_err', 'x_h2', 'x_err', 'mzz_h2',
     'mzz_err'} (see run_h2_emulator.run_phase_transition()/run_vqe()).
-    *_err are shot-noise standard errors.
-    h2_data entries without 'x_h2'/'x_err' (e.g. an older saved run_vqe() result)
-    fall back to NaN so the <X> panel just shows gaps rather than raising.
+    *_err are shot-noise standard errors
+    (shot_observables.bootstrap_observable_errors). h2_data entries without
+    'x_h2'/'x_err' (e.g. an older saved run_vqe() result) fall back to NaN
+    so the <X> panel just shows gaps rather than raising.
+
+    method_label/filename let callers distinguish which protocol produced
+    the data (e.g. "VQE" vs. the default "adiabatic") without duplicating
+    this function.
     """
     fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(16, 4.5))
 

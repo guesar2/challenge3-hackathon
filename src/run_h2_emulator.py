@@ -25,12 +25,13 @@ argument (also `--local` on the command line):
 Each of run()/run_phase_transition()/run_vqe() also takes a `noisy` argument
 (also `--noisy` on the command line) -- the noisy counterpart to the default
 H2_DEVICE_NAME (H2-1LE, noiseless). Passing noisy=True submits the exact
-same circuits to config.H2_DEVICE_NAME_NOISY (H2-Emulator) instead, which
-includes Quantinuum's real gate/SPAM/crosstalk noise model. Unlike local vs.
-qnexus, this isn't a free/paid pair of equivalent computations --
-H2-Emulator carries real published noise_specs, and it's Nexus-hosted
-rather than a device pytket-pecos can run locally, so it's only reachable
-through qnexus. noisy=True has no effect when local=True (there's no way to
+same circuits to config.H2_DEVICE_NAME_NOISY (H2-Emulator) instead, which includes
+Quantinuum's real gate/SPAM/crosstalk noise model. Unlike local vs. qnexus,
+this isn't a free/paid pair of equivalent computations -- H2-Emulator carries
+real published noise_specs (gate/SPAM/crosstalk/dephasing error rates,
+not exact state-vector emulation), and it's Nexus-hosted rather than a
+device pytket-pecos can run locally, so it's only reachable through
+qnexus. noisy=True has no effect when local=True (there's no way to
 inject H2-Emulator's noise model into the local pytket-pecos path). noisy=True
 still costs qnexus quota and is still gated by config.RUN_ON_H2_EMULATOR --
 it does not submit anything by itself, it just points the same
@@ -187,6 +188,16 @@ def run_phase_transition(local=False, noisy=False):
     time-resolution -- see config.py's H2_ADIABATIC_CRITICAL_TIME_FACTOR
     comment for the numbers that pinned this down).
 
+    A finer-dt-at-fixed-time variant was tried first (since 2000 shots
+    showed h/J=1's bias was statistically real, not noise) but barely moved
+    the deviation; a local_emulator_backend test isolating time vs.
+    resolution (free to run at high shot counts) showed doubling the total
+    ramp time at the original dt fixed it (~6.5% -> ~2.15%), while doubling
+    resolution at fixed time did not -- see config.py's
+    H2_ADIABATIC_CRITICAL_TIME_FACTOR comment for the numbers. Textbook
+    critical slowing down: the adiabatic theorem needs more *time* as the
+    gap closes, not finer time-resolution.
+
     Any other target whose ramp *passes through* h/J=1 without landing
     there (e.g. h/J=0.5 with H_INIT=4.0 sweeps down through 1.0 on the way
     to 0.5) gets a related but larger treatment
@@ -226,7 +237,20 @@ def run_phase_transition(local=False, noisy=False):
 
     h_values = list(config.H2_H_VALUES)
     dt_by_target = [config.H2_ADIABATIC_DT for _ in h_values]  # same dt for every target
-
+    # A target doesn't have to *end* at h/J=1 to need the critical-slowing-down
+    # treatment -- a linear ramp from H_INIT down to a target below 1 (e.g.
+    # h/J=0.5, with H_INIT=4.0) passes *through* h/J=1 partway along the ramp,
+    # at the same constant rate as the rest of the sweep. That transit needs
+    # even *more* total time than landing on h/J=1 itself (see
+    # H2_ADIABATIC_TRANSIT_TIME_FACTOR's comment in config.py for the sweep
+    # that pinned this down): landing on h/J=1 only has to be adiabatic
+    # approaching the gapless point, while a target past it (h/J=0.5) has to
+    # stay adiabatic approaching AND leaving the gapless point within the
+    # same ramp. (Confirmed empirically: h/J=0.5's <X> was 21.6% off ED on
+    # the real qnexus run at the rate_ref-only step count, and still 9.00%
+    # at h/J=1's own 200-step treatment, dropping to 0.43% at 400 steps;
+    # h/J=2.0, whose ramp from H_INIT never crosses 1.0, was under 0.5% at
+    # the plain rate_ref-based count throughout.)
     def _ramp_steps(h):
         if h == config.J:
             return round(config.H2_ADIABATIC_MAX_STEPS * config.H2_ADIABATIC_CRITICAL_TIME_FACTOR)
@@ -257,6 +281,8 @@ def run_phase_transition(local=False, noisy=False):
         job_result = raw_by_h[h]
         z_rms, mzz = bitstrings_to_observables(job_result["bitstrings"], config.H2_ADIABATIC_N)
         z_se, mzz_se = bootstrap_observable_errors(job_result["bitstrings"], config.H2_ADIABATIC_N)
+        # <X> is a signed mean, not an RMS -- see the comment in run()
+        # above and bitstrings_to_mx's docstring.
         x_mean = bitstrings_to_mx(job_result["bitstrings_x"], config.H2_ADIABATIC_N)
         x_se = bootstrap_mx_error(job_result["bitstrings_x"], config.H2_ADIABATIC_N)
 

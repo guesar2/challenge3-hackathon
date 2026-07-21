@@ -71,12 +71,9 @@ def submit_quench_batch(N, h_field, J, dt, step_counts, n_shots, device_name="H2
     measured in) so the Z-basis and X-basis circuits for the whole
     step-count curve are still submitted as one compile/execute batch.
 
-    Returns {step_count: result_dict}, where each result_dict contains:
-      - 'bitstrings':  Z-basis measurement shots (for <Z> and <Zi Zi+1>)
-      - 'bitstrings_x': X-basis measurement shots (for <X>)
-      - metadata (circuit_ref_id, compiled_circuit_ref_id, job_name, etc.)
-
-    Callers should persist the whole dict as-is before postprocessing, since
+    Returns {step_count: result_dict}, each result_dict shaped like the
+    single-circuit submission used to (bitstrings + metadata) -- callers
+    should persist the whole dict as-is before postprocessing, since
     resubmitting to recover lost raw data spends quota again.
     """
     color_edges = build_chain_color_edges(N)

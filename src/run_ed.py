@@ -6,7 +6,7 @@ Ground-state observables (<Z>, <X>, <Zi Zi+1>, energy/N) across
 config.H_VALUES at config.N -- plus the classical scaling comparison
 (Comparación y escalado: 2+ problem sizes):
 
-- Observable scaling: ed_baseline run at every N in config.N_SCALING_VALUES
+- Observable scaling: ed_baseline run at every N in config.ED_EXTRA_N_VALUES
   (includes N=8, which the challenge doc's "Línea base clásica" section
   asks for specifically at h/J in {0.5, 1.0, 2.0}), plotted together.
 - Runtime scaling: wall-clock cost of the Hamiltonian build + eigsh vs. N
@@ -38,9 +38,7 @@ def run():
 
     # Observable scaling across 2+ sizes.
     ed_results_by_N = {config.N: ed_results}
-    # Use N_SCALING_VALUES if available, else fallback to ED_EXTRA_N_VALUES or just (config.N,)
-    scaling_Ns = getattr(config, "N_SCALING_VALUES", getattr(config, "ED_EXTRA_N_VALUES", (config.N,)))
-    for N in scaling_Ns:
+    for N in config.ED_EXTRA_N_VALUES:
         if N == config.N:
             continue
         ed_results_by_N[N] = ed_baseline(N, config.H_VALUES, J=config.J)
@@ -55,19 +53,17 @@ def run():
     # comparison, and the "honest extrapolation" evidence: measures actual
     # time on this machine, only extrapolating (dashed, clearly labeled) past
     # what was actually run.
-    runtime_Ns = getattr(config, "N_RUNTIME_SCALING_VALUES", (config.N,))
     print(f"\nMeasuring ED wall-clock cost vs. N (h/J=1.0, Hamiltonian build + eigsh)...")
     timings = []
-    for N in runtime_Ns:
+    for N in config.N_RUNTIME_SCALING_VALUES:
         t0 = time.perf_counter()
         ed_baseline(N, (1.0,), J=config.J, verbose=False)
         dt = time.perf_counter() - t0
         timings.append({"N": N, "dim": 2 ** N, "time_s": dt})
         print(f"  N={N:2d} (dim=2^{N}={2 ** N:6d}): {dt:8.3f}s")
     save_stage_results("ed_runtime_scaling", {"timings": timings})
-    extrapolate_to = getattr(config, "N_RUNTIME_SCALING_EXTRAPOLATE_TO", None)
     plot_ed_runtime_scaling(
-        timings, extrapolate_to=extrapolate_to,
+        timings, extrapolate_to=config.N_RUNTIME_SCALING_EXTRAPOLATE_TO,
         save_dir=config.PLOT_SAVE_DIR,
     )
 
