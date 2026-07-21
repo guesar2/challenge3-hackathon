@@ -17,8 +17,12 @@ ADIABATIC_HOLD_STEPS = 0   # extra steps at fixed (h_target, J) after the ramp,
                              # to check the state has actually settled (see plot_adiabatic_convergence)
 
 # Fixed-Hamiltonian time evolution (quench dynamics from a product state)
-QUENCH_DT = 0.05
-QUENCH_STEPS = 400          # total evolution time = QUENCH_DT * QUENCH_STEPS
+QUENCH_DT = 0.025           # halved from 0.05 -- at 0.05, h/J=2.0's max % deviation in
+                             # <Zi Zi+1> vs. ED was 8.46%, over the challenge's <5% target;
+                             # run_dt_convergence.py's sweep confirmed 0.025 brings it to
+                             # ~2.1% (O(dt^2) scaling), so halving dt alone fixes it
+QUENCH_STEPS = 800          # doubled to keep total evolution time = QUENCH_DT * QUENCH_STEPS
+                             # fixed at 20.0 (same total time as before, just finer resolution)
 QUENCH_INITIAL_STATE = None  # None -> defaults to |00...0>
 
 # Where to save figures. Set to None to skip saving (only meaningful if

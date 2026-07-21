@@ -60,29 +60,37 @@ def submit_quench_batch(N, h_field, J, dt, step_counts, n_shots, device_name="H2
 
     Costs against the qnexus usage quota -- call only with explicit approval.
 
+    Each entry is measured in both the Z and X basis (two circuits per
+    step count -- TFIM's <Z> and <X> magnetization both matter for the
+    phase-transition signal, and hardware only returns the basis it was
+    measured in) so the Z-basis and X-basis circuits for the whole
+    step-count curve are still submitted as one compile/execute batch.
+
     Returns {step_count: result_dict}, each result_dict shaped like the
-    single-circuit submission used to (bitstrings + metadata) -- callers
-    should persist the whole dict as-is before postprocessing, since
-    resubmitting to recover lost raw data spends quota again.
+    single-circuit submission used to (bitstrings + bitstrings_x +
+    metadata) -- callers should persist the whole dict as-is before
+    postprocessing, since resubmitting to recover lost raw data spends
+    quota again.
     """
     color_edges = build_chain_color_edges(N)
     project = get_project(project_name)
     job_name = job_name or f"tfim-quench-N{N}-h{h_field:.2f}"
 
+    bases = ("z", "x")
     circuits = [
         build_quench_circuit(N, color_edges, steps, dt, h_field, J, mirror=mirror,
-                              initial_state_label=initial_state_label)
-        for steps in step_counts
+                              initial_state_label=initial_state_label, basis=basis)
+        for steps in step_counts for basis in bases
     ]
     circuit_refs = [
         qnx.circuits.upload(
             circuit=circ,
-            name=f"{job_name}-steps{steps}",
+            name=f"{job_name}-steps{steps}-{basis}",
             project=project,
             description=(f"TFIM Trotter quench: N={N}, h/J={h_field / J:.2f}, "
-                          f"dt={dt}, steps={steps}, mirror={mirror}"),
+                          f"dt={dt}, steps={steps}, mirror={mirror}, basis={basis}"),
         )
-        for steps, circ in zip(step_counts, circuits)
+        for (steps, basis), circ in zip(((s, b) for s in step_counts for b in bases), circuits)
     ]
 
     backend_config = qnx.QuantinuumConfig(device_name=device_name)
@@ -106,13 +114,25 @@ def submit_quench_batch(N, h_field, J, dt, step_counts, n_shots, device_name="H2
         project=project,
     )
 
+    bitstrings_by = {}
+    refs_by = {}
+    for (steps, basis), circuit_ref, compiled_ref, result in zip(
+        ((s, b) for s in step_counts for b in bases), circuit_refs, compiled_refs, results
+    ):
+        bitstrings_by[(steps, basis)] = ["".join(str(bit) for bit in shot) for shot in result.get_shots()]
+        refs_by[(steps, basis)] = (circuit_ref, compiled_ref)
+
     out = {}
-    for steps, circuit_ref, compiled_ref, result in zip(step_counts, circuit_refs, compiled_refs, results):
-        bitstrings = ["".join(str(bit) for bit in shot) for shot in result.get_shots()]
+    for steps in step_counts:
+        circuit_ref, compiled_ref = refs_by[(steps, "z")]
+        circuit_ref_x, compiled_ref_x = refs_by[(steps, "x")]
         out[steps] = {
-            "bitstrings": bitstrings,
+            "bitstrings": bitstrings_by[(steps, "z")],
+            "bitstrings_x": bitstrings_by[(steps, "x")],
             "circuit_ref_id": str(circuit_ref.id),
             "compiled_circuit_ref_id": str(compiled_ref.id),
+            "circuit_ref_id_x": str(circuit_ref_x.id),
+            "compiled_circuit_ref_id_x": str(compiled_ref_x.id),
             "job_name": job_name,
             "project_name": project_name,
             "device_name": device_name,
@@ -143,7 +163,11 @@ def submit_adiabatic_batch(N, h_targets, J, ramp_steps_by_target, dt_by_target, 
 
     Same batching rationale as submit_quench_batch -- one round trip for
     the whole h/J sweep instead of one per h -- just built from
-    build_adiabatic_circuit instead of build_quench_circuit.
+    build_adiabatic_circuit instead of build_quench_circuit. Each h_target
+    is measured in both the Z and X basis (two circuits per target, since
+    the phase-transition signal needs both <Z> and <X> and hardware only
+    returns the basis it was measured in), still folded into the same
+    single compile/execute batch across the whole sweep.
 
     Costs against the qnexus usage quota -- call only with explicit approval.
 
@@ -153,19 +177,26 @@ def submit_adiabatic_batch(N, h_targets, J, ramp_steps_by_target, dt_by_target, 
     project = get_project(project_name)
     job_name = job_name or f"tfim-adiabatic-N{N}"
 
-    circuits = [
-        build_adiabatic_circuit(N, color_edges, ramp_steps, dt, h_target, J, h_init, mirror=mirror)
+    bases = ("z", "x")
+    jobs = [
+        (h_target, ramp_steps, dt, basis)
         for h_target, ramp_steps, dt in zip(h_targets, ramp_steps_by_target, dt_by_target)
+        for basis in bases
+    ]
+    circuits = [
+        build_adiabatic_circuit(N, color_edges, ramp_steps, dt, h_target, J, h_init,
+                                 mirror=mirror, basis=basis)
+        for h_target, ramp_steps, dt, basis in jobs
     ]
     circuit_refs = [
         qnx.circuits.upload(
             circuit=circ,
-            name=f"{job_name}-h{h_target:.2f}",
+            name=f"{job_name}-h{h_target:.2f}-{basis}",
             project=project,
             description=(f"TFIM adiabatic ramp: N={N}, h_init={h_init}, h_target/J={h_target / J:.2f}, "
-                          f"dt={dt}, ramp_steps={ramp_steps}, mirror={mirror}"),
+                          f"dt={dt}, ramp_steps={ramp_steps}, mirror={mirror}, basis={basis}"),
         )
-        for h_target, ramp_steps, dt, circ in zip(h_targets, ramp_steps_by_target, dt_by_target, circuits)
+        for (h_target, ramp_steps, dt, basis), circ in zip(jobs, circuits)
     ]
 
     backend_config = qnx.QuantinuumConfig(device_name=device_name)
@@ -184,15 +215,25 @@ def submit_adiabatic_batch(N, h_targets, J, ramp_steps_by_target, dt_by_target, 
         project=project,
     )
 
-    out = {}
-    for h_target, ramp_steps, dt, circuit_ref, compiled_ref, result in zip(
-        h_targets, ramp_steps_by_target, dt_by_target, circuit_refs, compiled_refs, results
+    bitstrings_by = {}
+    refs_by = {}
+    for (h_target, ramp_steps, dt, basis), circuit_ref, compiled_ref, result in zip(
+        jobs, circuit_refs, compiled_refs, results
     ):
-        bitstrings = ["".join(str(bit) for bit in shot) for shot in result.get_shots()]
+        bitstrings_by[(h_target, basis)] = ["".join(str(bit) for bit in shot) for shot in result.get_shots()]
+        refs_by[(h_target, basis)] = (circuit_ref, compiled_ref)
+
+    out = {}
+    for h_target, ramp_steps, dt in zip(h_targets, ramp_steps_by_target, dt_by_target):
+        circuit_ref, compiled_ref = refs_by[(h_target, "z")]
+        circuit_ref_x, compiled_ref_x = refs_by[(h_target, "x")]
         out[h_target] = {
-            "bitstrings": bitstrings,
+            "bitstrings": bitstrings_by[(h_target, "z")],
+            "bitstrings_x": bitstrings_by[(h_target, "x")],
             "circuit_ref_id": str(circuit_ref.id),
             "compiled_circuit_ref_id": str(compiled_ref.id),
+            "circuit_ref_id_x": str(circuit_ref_x.id),
+            "compiled_circuit_ref_id_x": str(compiled_ref_x.id),
             "job_name": job_name,
             "project_name": project_name,
             "device_name": device_name,

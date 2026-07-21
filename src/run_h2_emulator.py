@@ -33,7 +33,10 @@ import config
 from exact_diagonalization import ed_baseline, ed_time_evolution_exact
 from persistence import save_stage_results, load_latest
 from plotting import plot_h2_vs_ed_time, plot_h2_phase_transition, plot_vqe_convergence
-from shot_observables import bitstrings_to_observables, bootstrap_observable_errors
+from shot_observables import (
+    bitstrings_to_observables, bootstrap_observable_errors,
+    bitstrings_to_mx, bootstrap_mx_error,
+)
 
 
 def run(local=False):
@@ -81,33 +84,45 @@ def run(local=False):
         raw_by_h[h] = batch_results
         save_stage_results(raw_stage, raw_by_h)
 
-        times, z_h2, z_err, mzz_h2, mzz_err = [], [], [], [], []
+        times, z_h2, z_err, x_h2, x_err, mzz_h2, mzz_err = [], [], [], [], [], [], []
         for step_count in step_counts:
             job_result = batch_results[step_count]
             z_rms, mzz = bitstrings_to_observables(job_result["bitstrings"], config.H2_N)
             z_se, mzz_se = bootstrap_observable_errors(job_result["bitstrings"], config.H2_N)
+            # <X> does not vanish by symmetry the way <Z> does (the -h*X
+            # field polarizes the ground state along +X), so it's a plain
+            # signed mean over shots -- see bitstrings_to_mx -- not the
+            # RMS formula bitstrings_to_observables uses for <Z>.
+            x_mean = bitstrings_to_mx(job_result["bitstrings_x"], config.H2_N)
+            x_se = bootstrap_mx_error(job_result["bitstrings_x"], config.H2_N)
 
             times.append(step_count * config.H2_DT)
             z_h2.append(z_rms)
             z_err.append(z_se)
+            x_h2.append(x_mean)
+            x_err.append(x_se)
             mzz_h2.append(mzz)
             mzz_err.append(mzz_se)
 
-        _, z_ed, mzz_ed, _ = ed_time_evolution_exact(
+        _, z_ed, mzz_ed, x_ed = ed_time_evolution_exact(
             config.H2_N, h, config.J, config.H2_DT, config.H2_STEPS
         )
 
         max_pct_z = max(abs(a - b) / abs(b) * 100 if b != 0 else 0
                          for a, b in zip(z_h2, z_ed))
+        max_pct_x = max(abs(a - b) / abs(b) * 100 if b != 0 else 0
+                         for a, b in zip(x_h2, x_ed))
         max_pct_mzz = max(abs(a - b) / abs(b) * 100 if b != 0 else 0
                            for a, b in zip(mzz_h2, mzz_ed))
         print(f"\n  h/J={h:.2f}: max deviation <Z> = {max_pct_z:.2f}%, "
+              f"max deviation <X> = {max_pct_x:.2f}%, "
               f"max deviation <Zi Zi+1> = {max_pct_mzz:.2f}%")
 
         results[h] = {
             'times': times, 'z_h2': z_h2, 'z_err': z_err,
+            'x_h2': x_h2, 'x_err': x_err,
             'mzz_h2': mzz_h2, 'mzz_err': mzz_err,
-            'z_ed': list(z_ed), 'mzz_ed': list(mzz_ed),
+            'z_ed': list(z_ed), 'x_ed': list(x_ed), 'mzz_ed': list(mzz_ed),
         }
 
     save_stage_results(results_stage, results)
@@ -161,6 +176,17 @@ def run_phase_transition(local=False):
     fixed time did not -- see config.py's H2_ADIABATIC_CRITICAL_TIME_FACTOR
     comment for the numbers. Textbook critical slowing down: the adiabatic
     theorem needs more *time* as the gap closes, not finer time-resolution.
+
+    Any other target whose ramp *passes through* h/J=1 on the way from
+    H_INIT gets the same treatment, not just a target that lands exactly on
+    it -- see _crosses_critical below. With H_INIT=4.0, that's h/J=0.5 (the
+    ramp sweeps down through 1.0 before reaching 0.5) in addition to h/J=1.0
+    itself; h/J=2.0's ramp (4.0 -> 2.0) never crosses 1.0 so it keeps the
+    plain rate_ref-based step count. Confirmed empirically: at the
+    rate_ref-only step count, h/J=0.5's <X> was 21.6% off ED (Z/ZZ passable
+    but also elevated) while h/J=2.0 was within 0.5% on all three
+    observables -- consistent with mid-ramp critical transit, not just ramp
+    distance, being the limiting factor for h/J=0.5.
     """
     print("=" * 60)
     print(f"H2 ADIABATIC SWEEP (phase-transition signal, {config.H2_DEVICE_NAME}, "
@@ -185,10 +211,22 @@ def run_phase_transition(local=False):
 
     h_values = list(config.H2_H_VALUES)
     dt_by_target = [config.H2_ADIABATIC_DT for _ in h_values]  # same dt for every target
+    # A target doesn't have to *end* at h/J=1 to need the critical-slowing-down
+    # treatment -- a linear ramp from H_INIT down to a target below 1 (e.g.
+    # h/J=0.5, with H_INIT=4.0) passes *through* h/J=1 partway along the ramp,
+    # at the same constant rate as the rest of the sweep. That transit needs
+    # the same longer-total-time treatment as landing on h/J=1 itself, not
+    # just the |Delta h|-based rate_ref scaling, which only accounts for
+    # total distance and not for slowing through the gapless point along the
+    # way. (Confirmed empirically: h/J=0.5's <X> was 21.6% off ED at the
+    # rate_ref-only step count -- H_INIT..h/J=0.5 crosses 1.0 -- while
+    # h/J=2.0, whose ramp from H_INIT never crosses 1.0, was within 0.5%.)
+    def _crosses_critical(h):
+        return min(config.H_INIT, h) <= config.J <= max(config.H_INIT, h)
+
     ramp_steps_by_target = [
-        # h/J=1: longer total ramp time (more steps at the same dt), not
-        # finer resolution -- see docstring above.
-        round(config.H2_ADIABATIC_MAX_STEPS * config.H2_ADIABATIC_CRITICAL_TIME_FACTOR) if h == config.J
+        round(config.H2_ADIABATIC_MAX_STEPS * config.H2_ADIABATIC_CRITICAL_TIME_FACTOR)
+        if _crosses_critical(h)
         else min(
             steps_for_target(h, config.H2_ADIABATIC_DT, config.H2_ADIABATIC_RATE_REF, h_init=config.H_INIT),
             config.H2_ADIABATIC_MAX_STEPS,
@@ -220,16 +258,24 @@ def run_phase_transition(local=False):
         job_result = raw_by_h[h]
         z_rms, mzz = bitstrings_to_observables(job_result["bitstrings"], config.H2_ADIABATIC_N)
         z_se, mzz_se = bootstrap_observable_errors(job_result["bitstrings"], config.H2_ADIABATIC_N)
+        # <X> is a signed mean, not an RMS -- see the comment in run()
+        # above and bitstrings_to_mx's docstring.
+        x_mean = bitstrings_to_mx(job_result["bitstrings_x"], config.H2_ADIABATIC_N)
+        x_se = bootstrap_mx_error(job_result["bitstrings_x"], config.H2_ADIABATIC_N)
 
         ed_z = next(r['mz_rms'] for r in ed_results if r['h'] == h)
+        ed_x = next(r['mx'] for r in ed_results if r['h'] == h)
         ed_mzz = next(r['mzz'] for r in ed_results if r['h'] == h)
         pct_z = abs(z_rms - ed_z) / ed_z * 100 if ed_z != 0 else 0
+        pct_x = abs(x_mean - ed_x) / abs(ed_x) * 100 if ed_x != 0 else 0
         pct_mzz = abs(mzz - ed_mzz) / abs(ed_mzz) * 100 if ed_mzz != 0 else 0
         print(f"  h/J={h:.2f}: H2 <Z>       = {z_rms:.4f}  (ED = {ed_z:.4f}, {pct_z:.2f}% diff)")
+        print(f"           H2 <X>       = {x_mean:.4f}  (ED = {ed_x:.4f}, {pct_x:.2f}% diff)")
         print(f"           H2 <Zi Zi+1> = {mzz:.4f}  (ED = {ed_mzz:.4f}, {pct_mzz:.2f}% diff)")
 
         results[h] = {
             'z_h2': z_rms, 'z_err': z_se,
+            'x_h2': x_mean, 'x_err': x_se,
             'mzz_h2': mzz, 'mzz_err': mzz_se,
         }
 

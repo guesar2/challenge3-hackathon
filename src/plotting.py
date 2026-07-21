@@ -182,22 +182,23 @@ def plot_fixed_hamiltonian_evolution(h_values, evolution_results, ed_results, sa
 
 def plot_h2_vs_ed_time(h_values, time_series_data, save_dir=None, saved_at=None,
                         filename="h2_vs_ed_time.png"):
-    """<Z> and <Zi Zi+1> vs. time for the H2 emulator quench, one row per h/J,
-    with the ED exact evolution as a continuous reference curve.
+    """<Z>, <X>, and <Zi Zi+1> vs. time for the H2 emulator quench, one row
+    per h/J, with the ED exact evolution as a continuous reference curve.
 
-    time_series_data: dict h -> {'times', 'z_h2', 'z_err', 'mzz_h2',
-    'mzz_err', 'z_ed', 'mzz_ed'} (see run_h2_emulator.run()). z_err/mzz_err
-    are shot-noise standard errors (bootstrap over the raw measured shots --
-    see qnexus_backend.bootstrap_observable_errors), shown as error bars so
-    the hardware numbers aren't reported without a noise estimate alongside
-    them.
+    time_series_data: dict h -> {'times', 'z_h2', 'z_err', 'x_h2', 'x_err',
+    'mzz_h2', 'mzz_err', 'z_ed', 'x_ed', 'mzz_ed'} (see
+    run_h2_emulator.run()). *_err are shot-noise standard errors (bootstrap
+    over the raw measured shots -- see
+    qnexus_backend.bootstrap_observable_errors), shown as error bars so the
+    hardware numbers aren't reported without a noise estimate alongside them.
     """
-    fig, axes = plt.subplots(len(h_values), 2, figsize=(12, 4 * len(h_values)))
+    fig, axes = plt.subplots(len(h_values), 3, figsize=(17, 4 * len(h_values)))
 
     for idx, h in enumerate(h_values):
         r = time_series_data[h]
+        row = axes[idx] if len(h_values) > 1 else axes
 
-        ax1 = axes[idx, 0] if len(h_values) > 1 else axes[0]
+        ax1 = row[0]
         ax1.plot(r['times'], r['z_ed'], 'r-', linewidth=2, label='ED (exact)')
         ax1.errorbar(r['times'], r['z_h2'], yerr=r['z_err'], fmt='bo', markersize=6,
                      capsize=4, label='H2 emulator')
@@ -207,15 +208,25 @@ def plot_h2_vs_ed_time(h_values, time_series_data, save_dir=None, saved_at=None,
         ax1.grid(True, alpha=0.3)
         ax1.legend(loc='best', fontsize=8)
 
-        ax2 = axes[idx, 1] if len(h_values) > 1 else axes[1]
-        ax2.plot(r['times'], r['mzz_ed'], 'r-', linewidth=2, label='ED (exact)')
-        ax2.errorbar(r['times'], r['mzz_h2'], yerr=r['mzz_err'], fmt='bo', markersize=6,
+        ax2 = row[1]
+        ax2.plot(r['times'], r['x_ed'], 'r-', linewidth=2, label='ED (exact)')
+        ax2.errorbar(r['times'], r['x_h2'], yerr=r['x_err'], fmt='go', markersize=6,
                      capsize=4, label='H2 emulator')
         ax2.set_xlabel('Time t')
-        ax2.set_ylabel(r'$\langle Z_i Z_{i+1} \rangle$')
+        ax2.set_ylabel(r'$\langle X \rangle$ (mean per site)')
         ax2.set_title(f'h/J = {h:.1f} (starting from |0...0>)')
         ax2.grid(True, alpha=0.3)
         ax2.legend(loc='best', fontsize=8)
+
+        ax3 = row[2]
+        ax3.plot(r['times'], r['mzz_ed'], 'r-', linewidth=2, label='ED (exact)')
+        ax3.errorbar(r['times'], r['mzz_h2'], yerr=r['mzz_err'], fmt='bo', markersize=6,
+                     capsize=4, label='H2 emulator')
+        ax3.set_xlabel('Time t')
+        ax3.set_ylabel(r'$\langle Z_i Z_{i+1} \rangle$')
+        ax3.set_title(f'h/J = {h:.1f} (starting from |0...0>)')
+        ax3.grid(True, alpha=0.3)
+        ax3.legend(loc='best', fontsize=8)
 
     title = 'Quantinuum H2 Emulator Quench vs. Exact Diagonalization (error bars: shot noise)'
     if saved_at:
@@ -228,24 +239,30 @@ def plot_h2_vs_ed_time(h_values, time_series_data, save_dir=None, saved_at=None,
 
 def plot_h2_phase_transition(h_values, h2_data, ed_results, save_dir=None, saved_at=None,
                               method_label="adiabatic", filename="h2_phase_transition.png"):
-    """<Z> and <Zi Zi+1> vs. h/J for an H2 ground-state-search protocol
+    """<Z>, <X>, and <Zi Zi+1> vs. h/J for an H2 ground-state-search protocol
     (adiabatic ramp or VQE), vs. the ED ground state -- the phase-transition
     signal (h/J=1 crossover) as reproduced on hardware, styled like
     plot_phase_transition.
 
-    h2_data: dict h -> {'z_h2', 'z_err', 'mzz_h2', 'mzz_err'} (see
-    run_h2_emulator.run_phase_transition()/run_vqe()). z_err/mzz_err are
-    shot-noise standard errors (qnexus_backend.bootstrap_observable_errors).
+    h2_data: dict h -> {'z_h2', 'z_err', 'x_h2', 'x_err', 'mzz_h2',
+    'mzz_err'} (see run_h2_emulator.run_phase_transition()/run_vqe()).
+    *_err are shot-noise standard errors
+    (qnexus_backend.bootstrap_observable_errors). h2_data entries without
+    'x_h2'/'x_err' (e.g. an older saved run_vqe() result) fall back to NaN
+    so the <X> panel just shows gaps rather than raising.
 
     method_label/filename let callers distinguish which protocol produced
     the data (e.g. "VQE" vs. the default "adiabatic") without duplicating
     this function.
     """
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(11, 4.5))
+    fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(16, 4.5))
 
     z_h2 = [h2_data[h]['z_h2'] for h in h_values]
     z_err = [h2_data[h]['z_err'] for h in h_values]
     z_ed = [next(r['mz_rms'] for r in ed_results if r['h'] == h) for h in h_values]
+    x_h2 = [h2_data[h].get('x_h2', float('nan')) for h in h_values]
+    x_err = [h2_data[h].get('x_err', 0.0) for h in h_values]
+    x_ed = [next(r['mx'] for r in ed_results if r['h'] == h) for h in h_values]
     mzz_h2 = [h2_data[h]['mzz_h2'] for h in h_values]
     mzz_err = [h2_data[h]['mzz_err'] for h in h_values]
     mzz_ed = [next(r['mzz'] for r in ed_results if r['h'] == h) for h in h_values]
@@ -260,15 +277,25 @@ def plot_h2_phase_transition(h_values, h2_data, ed_results, save_dir=None, saved
     ax1.grid(True, alpha=0.3)
     ax1.legend()
 
-    ax2.errorbar(h_values, mzz_h2, yerr=mzz_err, fmt='bo', markersize=8, capsize=4,
+    ax2.errorbar(h_values, x_h2, yerr=x_err, fmt='go', markersize=8, capsize=4,
                  label=f'H2 emulator ({method_label})')
-    ax2.plot(h_values, mzz_ed, 'rs--', markersize=8, label='ED (ground state)')
+    ax2.plot(h_values, x_ed, 'rs--', markersize=8, label='ED (ground state)')
     ax2.axvline(x=1.0, color='gray', linestyle=':', alpha=0.7, label='Critical h/J=1')
     ax2.set_xlabel('Target h / J')
-    ax2.set_ylabel(r'$\langle Z_i Z_{i+1} \rangle$')
-    ax2.set_title('Quantum Phase Transition (H2 Emulator) — <Zi Zi+1>')
+    ax2.set_ylabel(r'$\langle X \rangle$')
+    ax2.set_title('Quantum Phase Transition (H2 Emulator) — <X>')
     ax2.grid(True, alpha=0.3)
     ax2.legend()
+
+    ax3.errorbar(h_values, mzz_h2, yerr=mzz_err, fmt='bo', markersize=8, capsize=4,
+                 label=f'H2 emulator ({method_label})')
+    ax3.plot(h_values, mzz_ed, 'rs--', markersize=8, label='ED (ground state)')
+    ax3.axvline(x=1.0, color='gray', linestyle=':', alpha=0.7, label='Critical h/J=1')
+    ax3.set_xlabel('Target h / J')
+    ax3.set_ylabel(r'$\langle Z_i Z_{i+1} \rangle$')
+    ax3.set_title('Quantum Phase Transition (H2 Emulator) — <Zi Zi+1>')
+    ax3.grid(True, alpha=0.3)
+    ax3.legend()
 
     method_title = method_label if method_label.isupper() else method_label.title()
     title = f'Quantinuum H2 {method_title} vs. Exact Diagonalization (error bars: shot noise)'
