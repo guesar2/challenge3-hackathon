@@ -8,6 +8,41 @@ N = 6                       # number of spins in the periodic chain
 J = 1.0                     # ZZ coupling strength
 H_VALUES = (0.5, 1.0, 2.0)  # target transverse fields to probe (critical point at h/J=1)
 
+ED_SCALING_N = 8            # kept for backwards compat with anything reading this name
+                             # directly -- superseded by N_SCALING_VALUES below, which includes
+                             # it. The challenge doc's "Línea base clásica" section specifically
+                             # asks for h/J in {0.5, 1.0, 2.0} at N=8.
+
+N_SCALING_VALUES = (6, 8, 10)  # system sizes for the *observable* scaling comparison
+                             # (Comparación y escalado: 2+ problem sizes) -- run_ed.py runs
+                             # ed_baseline at each of these across H_VALUES and plots them
+                             # together. All three are fast (<3s combined on this machine,
+                             # see N_RUNTIME_SCALING_VALUES below for why N=10 is roughly where
+                             # that stops being true) so this runs unconditionally as part of
+                             # the default pipeline, no opt-in flag needed.
+
+N_RUNTIME_SCALING_VALUES = (6, 8, 10, 12)  # system sizes for the *wall-clock cost* scaling
+                             # benchmark (one h/J=1.0 point each, not the full H_VALUES grid,
+                             # since only the N-dependence matters here) -- this is the
+                             # concrete "honest extrapolation: state where classical methods
+                             # still win" evidence. Measured on this machine: N=6/8/10/12 took
+                             # 0.03s/0.12s/2.0s/104s respectively -- note the N=10->12 jump
+                             # (52x, not the ~4x that 2^N alone would predict) comes largely
+                             # from pauli_ops.py building each Pauli term as a DENSE 2^N x 2^N
+                             # matrix (np.kron) before sparsifying, and
+                             # build_collective_observables' Mz/Mx/Mzz operators staying dense
+                             # throughout -- i.e. this specific implementation's classical wall
+                             # is hit earlier than the Hilbert space's fundamental 2^N scaling
+                             # alone would force; a sparse-native rewrite would push it out
+                             # further, but the exponential trend itself doesn't go away, which
+                             # is the actual point of the comparison. N capped at 12 here --
+                             # N=14's dense 2^14 x 2^14 complex128 intermediate alone is ~4.3GB
+                             # and, extrapolating the measured trend, would take on the order of
+                             # an hour, not worth actually running.
+N_RUNTIME_SCALING_EXTRAPOLATE_TO = 20  # plot_ed_runtime_scaling fits the measured points and
+                             # projects (dashed, clearly marked "not run") out to this N, to
+                             # make the "where classical still wins" wall visually concrete.
+
 H_INIT = 4.0                # starting transverse field for adiabatic sweeps (deep paramagnetic)
 
 # Adiabatic sweep

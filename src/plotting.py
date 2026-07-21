@@ -40,6 +40,88 @@ def _finalize(fig, filename, save_dir):
         plt.close(fig)
 
 
+def plot_ed_scaling(h_values, ed_results_by_N, save_dir=None, filename="ed_scaling.png"):
+    """<X>, <Z>_rms, and <Zi Zi+1> vs. h/J, one line per system size N --
+    the observable side of the scaling comparison (run_ed.py runs ED at
+    every N in config.N_SCALING_VALUES and passes them all here).
+
+    ed_results_by_N: dict N -> list of per-h dicts as returned by
+    exact_diagonalization.ed_baseline (each {'h', 'mz_rms', 'mx', 'mzz',
+    'energy'}).
+    """
+    fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(16, 4.5))
+
+    for N, ed_results in sorted(ed_results_by_N.items()):
+        x_vals = [r['mx'] for r in ed_results]
+        z_vals = [r['mz_rms'] for r in ed_results]
+        zz_vals = [r['mzz'] for r in ed_results]
+        ax1.plot(h_values, x_vals, '-o', markersize=7, label=f'N = {N}')
+        ax2.plot(h_values, z_vals, '-o', markersize=7, label=f'N = {N}')
+        ax3.plot(h_values, zz_vals, '-o', markersize=7, label=f'N = {N}')
+
+    for ax, ylabel, title in (
+        (ax1, r'$\langle X \rangle$', 'Magnetización en X'),
+        (ax2, r'$\langle Z \rangle$ (RMS por sitio)', 'Magnetización en Z'),
+        (ax3, r'$\langle Z_i Z_{i+1} \rangle$', 'Correlación ZZ'),
+    ):
+        ax.axvline(x=1.0, color='gray', linestyle=':', alpha=0.7, label='Crítico h/J=1')
+        ax.set_xlabel('h / J')
+        ax.set_ylabel(ylabel)
+        ax.set_title(title)
+        ax.grid(True, alpha=0.3)
+        ax.legend(fontsize=8)
+
+    fig.suptitle('ED ground-state observables vs. system size (classical baseline scaling)',
+                 fontsize=10)
+    _finalize(fig, filename, save_dir)
+    return fig
+
+
+def plot_ed_runtime_scaling(timings, extrapolate_to=None, save_dir=None,
+                             filename="ed_runtime_scaling.png"):
+    """Wall-clock ED cost (Hamiltonian build + eigsh, one h/J point) vs.
+    system size N, log-scale y-axis -- the "honest extrapolation: state
+    where classical methods still win" evidence (run_ed.py measures
+    `timings` at config.N_RUNTIME_SCALING_VALUES).
+
+    timings: list of {'N', 'dim', 'time_s'} dicts, all actually measured on
+    this machine -- see run_ed.py. If extrapolate_to is given (and exceeds
+    the largest measured N), a log-linear fit through the measured points
+    (exponential-growth assumption, consistent with the 2^N Hilbert space)
+    is projected out to it and plotted as a separate, clearly-labeled
+    dashed series -- never blended into the "measured" line, since it is
+    NOT an actual run.
+    """
+    N_vals = np.array([t['N'] for t in timings])
+    t_vals = np.array([t['time_s'] for t in timings])
+
+    fig, ax = plt.subplots(figsize=(8.5, 5.5))
+    ax.semilogy(N_vals, t_vals, 'o-', color='steelblue', markersize=8,
+                label='Measured (this machine)')
+
+    if extrapolate_to and extrapolate_to > N_vals.max():
+        fit_slope, fit_intercept = np.polyfit(N_vals, np.log(t_vals), 1)
+        N_ext = np.arange(N_vals.max(), extrapolate_to + 1)
+        t_ext = np.exp(fit_intercept + fit_slope * N_ext)
+        ax.semilogy(N_ext, t_ext, 'o--', color='indianred', markersize=6, alpha=0.7,
+                    label='Extrapolated (log-linear fit, NOT run)')
+
+    for seconds, label in ((60, '1 min'), (3600, '1 hour'), (86400, '1 day')):
+        if seconds >= t_vals.min():
+            ax.axhline(seconds, color='gray', linestyle=':', alpha=0.5, linewidth=1)
+            ax.annotate(label, xy=(N_vals.min(), seconds), xytext=(2, 2),
+                        textcoords='offset points', fontsize=8, color='gray')
+
+    ax.set_xlabel('N (number of spins)')
+    ax.set_ylabel('Wall-clock time (s, log scale)')
+    ax.set_title('Classical ED cost vs. system size (h/J = 1, this implementation)')
+    ax.set_xticks(N_vals if extrapolate_to is None else np.arange(N_vals.min(), extrapolate_to + 1, 2))
+    ax.grid(True, which='both', alpha=0.3)
+    ax.legend(fontsize=9)
+    _finalize(fig, filename, save_dir)
+    return fig
+
+
 def plot_adiabatic_convergence(h_values, trotter_data, ed_results, rate_ref, save_dir=None):
     """<Z>, <ZiZi+1>, <X> vs. sweep time, for each target h, with ED reference lines."""
     fig, axes = plt.subplots(1, 3, figsize=(17, 5))
