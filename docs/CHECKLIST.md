@@ -118,17 +118,45 @@ real qnexus run).
 
 - [x] Direct quantum-vs-classical comparison on the same problem instance
       (Trotter vs. ED for matching N, h) — have this.
-- [ ] Scaling across **2+ problem sizes**. ⚠️ **Still not wired into the
-      live pipeline.** `config.py` runs a single `N=6` throughout
-      (`H2_ADIABATIC_N=6`, `H2_VQE_N=6`). `src/ed_figures.py` *does*
-      contain an N∈{6,8} sweep and an N=8 baseline section, but it is
-      **dead code** — nothing imports it (`ftim_main.py`, `run_ed.py`,
-      etc. don't call it; last touched only in the original "Implement
-      FTIM simulation" commit) — so it produces no figures today. Either
-      wire it into `run_ed.py`/`ftim_main.py` and actually run it, or
-      write a small equivalent that runs and is checked in as a real
-      figure.
-- [ ] Honest extrapolation: state where classical methods still win.
+- [x] **Scaling across 2+ problem sizes — done this session.**
+      `src/ed_figures.py`'s N∈{6,8} sweep was dead code (nothing imported
+      it); wrote a real equivalent instead. `run_ed.py` now:
+      - Runs `ed_baseline` at every `N` in `config.N_SCALING_VALUES =
+        (6, 8, 10)` across `config.H_VALUES`, plotted together in
+        `figures/ed_scaling.png` (⟨X⟩/⟨Z⟩/⟨Zᵢ Zᵢ₊₁⟩ vs. h/J, one line per
+        N) — the finite-size trend is visible directly (e.g. ⟨Z⟩ at
+        h/J=2.0: 0.554 at N=6 → 0.482 at N=8 → 0.431 at N=10, sharpening
+        toward the thermodynamic-limit crossover).
+      - Also measures actual wall-clock ED cost (Hamiltonian build +
+        `eigsh`, one h/J=1.0 point each) at `config.N_RUNTIME_SCALING_VALUES
+        = (6, 8, 10, 12)` — **real measured times**: 0.005s / 0.049s /
+        1.71s / 106s. Plotted log-scale in
+        `figures/ed_runtime_scaling.png`, with a log-linear fit
+        extrapolated (dashed, explicitly labeled "NOT run", never blended
+        with the real points) out to N=20 — crosses 1 hour around N≈17,
+        1 day around N≈19.
+      - Both stages are unconditional in `run_ed.run()` (no opt-in flag),
+        adding ~110s to every default `python main.py` run, dominated by
+        the N=12 timing point — a deliberate, real cost for a real
+        measurement.
+      - ⚠️ Noted honestly in `config.py`: the N=10→12 jump (>60x, not the
+        ~4x that 2^N scaling alone predicts) comes largely from
+        `pauli_ops.py` building each Pauli term as a **dense** matrix
+        (`np.kron`) before sparsifying, and
+        `build_collective_observables`'s `Mz`/`Mx`/`Mzz` operators staying
+        dense throughout — i.e. this specific implementation hits its
+        practical wall earlier than the Hilbert space's fundamental `2^N`
+        scaling alone would force. A sparse-native rewrite would push it
+        out further; the exponential trend itself wouldn't go away. Report
+        this distinction honestly rather than implying the measured wall
+        *is* the theoretical limit.
+- [x] **Honest extrapolation: state where classical methods still win —
+      done this session**, via the runtime-scaling plot above:
+      classical ED is trivially fast (≤2s) up to N=10, becomes noticeably
+      costly at N=12 (106s), and the extrapolated trend crosses 1 hour
+      around N≈17 and 1 day around N≈19 on this machine/implementation —
+      concrete, visual "where classical still wins" evidence for the
+      report, not just an assertion.
 - [ ] Classical baseline comparison cited from a published source (see
       Línea base clásica below — README already has the citations, port
       them into the technical report).
@@ -141,13 +169,15 @@ real qnexus run).
       `Ebadi et al. 2021`) — **still need to confirm these actually land in
       `docs/TECHNICAL_REPORT.md`**, not just the README, since the report
       is currently empty (see §0).
-- [ ] ED run for the specific required grid: `h/J ∈ {0.5, 1.0, 2.0}` at
-      **N=8** specifically (doc's "Línea base clásica" section). Current
-      `config.H_VALUES = (0.5, 1.0, 2.0)` now matches the h/J grid
-      (previously had a stray `1.5` — **fixed**), but `config.N = 6`
-      throughout — no N=8 ED run in the live pipeline (same dead-code gap
-      as the scaling item above; `ed_figures.py` has an N=8 section that
-      never runs).
+- [x] **ED run for the specific required grid — done this session.**
+      `h/J ∈ {0.5, 1.0, 2.0}` (`config.H_VALUES`, previously had a stray
+      `1.5` — fixed in an earlier session) at **N=8 specifically** is now
+      a real live-pipeline run: `config.N_SCALING_VALUES = (6, 8, 10)`
+      includes 8, run via `run_ed.py` (see §3 above for the same work —
+      it satisfies both this requirement and the scaling comparison at
+      once). N=8 results: ⟨Z⟩=0.9693/0.7858/0.4819, ⟨X⟩=0.2601/0.6407/
+      0.9336, ⟨Zᵢ Zᵢ₊₁⟩=0.9336/0.6407/0.2601 at h/J=0.5/1.0/2.0
+      respectively — saved in `data/ed_scaling_latest.json`.
 
 ## 5. Reproducibilidad — 10%
 
@@ -270,10 +300,15 @@ that is written up anywhere gradeable yet.
 
 ## Judge red flags to explicitly avoid (from "Orientación para los jueces")
 
-- [ ] Do **not** claim "quantum advantage" without a scaling comparison —
-      doubly true now that the N-scaling figure is dead code, not a live
-      result — don't cite it as done until `ed_figures.py` (or an
-      equivalent) is actually wired in and run.
+- [x] Do **not** claim "quantum advantage" without a scaling comparison —
+      **resolved this session**: `run_ed.py` now produces a real,
+      wired-in scaling comparison (`figures/ed_scaling.png` +
+      `figures/ed_runtime_scaling.png`, see §3 above). Still: only cite it
+      as a *classical cost-scaling* argument, not as "quantum advantage"
+      outright — no equivalent Trotter-circuit-cost-vs-N figure exists yet
+      to complete the actual advantage comparison (gate count/depth vs. N
+      for the quantum side), so keep the claim scoped to what's actually
+      shown.
 - [ ] Do not omit the limitations section (mandatory, still blocked on the
       technical report).
 - [ ] Do not cherry-pick the best run — the real qnexus VQE data
@@ -304,10 +339,11 @@ that is written up anywhere gradeable yet.
 ## Suggested order of work (given current repo state)
 
 1. ~~Fix `main.py` / entry-point ambiguity.~~ **Done.**
-2. ~~Fix `config.py`'s `h/J` grid to `{0.5, 1.0, 2.0}`.~~ **Done.** Still
-   need: an actual N=8 ED run and a ≥2-size scaling comparison wired into
-   something that runs (currently only exists as dead code in
-   `ed_figures.py`).
+2. ~~Fix `config.py`'s `h/J` grid to `{0.5, 1.0, 2.0}`.~~ **Done.**
+   ~~An actual N=8 ED run and a ≥2-size scaling comparison, wired into
+   something that runs.~~ **Also done** — `run_ed.py` now runs ED at
+   N∈{6,8,10} (observables) and N∈{6,8,10,12} (wall-clock cost,
+   extrapolated to N=20), replacing the dead `ed_figures.py` code path.
 3. ~~Add a live `dt`-halving Trotter convergence plot.~~ **Done** —
    `src/run_dt_convergence.py`, wired into `ftim_main.main()` as stage 4/5,
    confirms O(dt²) scaling. **Also fixed the follow-up it surfaced**:

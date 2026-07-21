@@ -22,6 +22,22 @@ the command line):
   under a "_local" stage suffix so they never overwrite a real qnexus run's
   saved data.
 
+Each of run()/run_phase_transition()/run_vqe() also takes a `noisy` argument
+(also `--noisy` on the command line) -- the noisy counterpart to the default
+H2_DEVICE_NAME (H2-1LE, noiseless). Passing noisy=True submits the exact
+same circuits to config.H2_DEVICE_NAME_NOISY (H2-Emulator) instead, which includes
+Quantinuum's real gate/SPAM/crosstalk noise model. Unlike local vs. qnexus,
+this isn't a free/paid pair of equivalent computations -- H2-Emulator carries
+real published noise_specs (gate/SPAM/crosstalk/dephasing error rates,
+not exact state-vector emulation), and it's Nexus-hosted rather than a
+device pytket-pecos can run locally, so it's only reachable through
+qnexus. noisy=True has no effect when local=True (there's no way to
+inject H2-Emulator's noise model into the local pytket-pecos path). noisy=True
+still costs qnexus quota and is still gated by config.RUN_ON_H2_EMULATOR --
+it does not submit anything by itself, it just points the same
+submit_*_batch calls at the noisy device. Results are saved under a
+"_noisy" stage suffix so they never overwrite a H2-1LE run's saved data.
+
 Because every qnexus submission costs quota, raw shot data is persisted
 (data/h2_emulator_raw_*.json) immediately after each job returns -- before
 any postprocessing -- so a bug in bitstrings_to_observables (or anything
@@ -39,11 +55,17 @@ from shot_observables import (
 )
 
 
-def run(local=False):
+def run(local=False, noisy=False):
+    device_name = config.H2_DEVICE_NAME_NOISY if (noisy and not local) else config.H2_DEVICE_NAME
     print("=" * 60)
-    print(f"STAGE 5/5: QUANTINUUM {config.H2_DEVICE_NAME} EMULATOR "
+    print(f"STAGE 5/5: QUANTINUUM {device_name} EMULATOR "
           f"({'local pytket-quantinuum/pecos' if local else 'qnexus/pytket'})")
     print("=" * 60)
+
+    if noisy and local:
+        print("Note: noisy=True has no effect when local=True -- pytket-pecos's "
+              "local emulator only runs H2-*LE (noiseless) devices; H2-Emulator's noise "
+              "model is only reachable through qnexus. Running local H2-1LE as usual.")
 
     if not local and not config.RUN_ON_H2_EMULATOR:
         print("Skipped (config.RUN_ON_H2_EMULATOR = False). Enable it to submit "
@@ -55,8 +77,9 @@ def run(local=False):
         from local_emulator_backend import submit_quench_batch
     else:
         from qnexus_backend import submit_quench_batch
-    raw_stage = "h2_emulator_raw_local" if local else "h2_emulator_raw"
-    results_stage = "h2_emulator_local" if local else "h2_emulator"
+    stage_suffix = "_local" if local else ("_noisy" if noisy else "")
+    raw_stage = f"h2_emulator_raw{stage_suffix}"
+    results_stage = f"h2_emulator{stage_suffix}"
 
     # qnexus/H2 only returns final measurement shots -- no mid-circuit
     # statevector readout -- so a <Z>/<Zi Zi+1> vs. time curve needs one
@@ -70,11 +93,11 @@ def run(local=False):
     for h in config.H2_H_VALUES:
         print(f"\nSubmitting N={config.H2_N}, h/J={h:.2f}, dt={config.H2_DT}, "
               f"steps=1..{config.H2_STEPS} (batched), shots={config.H2_SHOTS} "
-              f"to {config.H2_DEVICE_NAME} ...")
+              f"to {device_name} ...")
 
         batch_results = submit_quench_batch(
             config.H2_N, h, config.J, config.H2_DT, step_counts,
-            config.H2_SHOTS, device_name=config.H2_DEVICE_NAME,
+            config.H2_SHOTS, device_name=device_name,
             project_name=config.H2_PROJECT_NAME,
         )
 
@@ -129,13 +152,13 @@ def run(local=False):
 
     plot_h2_vs_ed_time(
         config.H2_H_VALUES, results, save_dir=config.PLOT_SAVE_DIR,
-        filename="h2_vs_ed_time_local.png" if local else "h2_vs_ed_time.png",
+        filename=f"h2_vs_ed_time{stage_suffix}.png",
     )
 
     return results
 
 
-def run_phase_transition(local=False):
+def run_phase_transition(local=False, noisy=False):
     """Adiabatic-ramp sweep on H2: the phase-transition signal (<Z>/<Zi
     Zi+1> vs. h/J across the h/J=1 critical point) reproduced on hardware,
     rather than the fixed-h quench-vs-time protocol in run().
@@ -186,10 +209,15 @@ def run_phase_transition(local=False):
     H2_ADIABATIC_TRANSIT_TIME_FACTOR's comment in config.py for the local
     sweep that picked its value.
     """
+    device_name = config.H2_DEVICE_NAME_NOISY if (noisy and not local) else config.H2_DEVICE_NAME
     print("=" * 60)
-    print(f"H2 ADIABATIC SWEEP (phase-transition signal, {config.H2_DEVICE_NAME}, "
+    print(f"H2 ADIABATIC SWEEP (phase-transition signal, {device_name}, "
           f"{'local pytket-quantinuum/pecos' if local else 'qnexus/pytket'})")
     print("=" * 60)
+
+    if noisy and local:
+        print("Note: noisy=True has no effect when local=True -- see run()'s "
+              "module-level note. Running local H2-1LE as usual.")
 
     if not local and not config.RUN_ON_H2_EMULATOR:
         print("Skipped (config.RUN_ON_H2_EMULATOR = False). Enable it to submit "
@@ -202,8 +230,9 @@ def run_phase_transition(local=False):
     else:
         from qnexus_backend import submit_adiabatic_batch
     from sweep_schedule import steps_for_target
-    raw_stage = "h2_adiabatic_raw_local" if local else "h2_adiabatic_raw"
-    results_stage = "h2_adiabatic_local" if local else "h2_adiabatic"
+    stage_suffix = "_local" if local else ("_noisy" if noisy else "")
+    raw_stage = f"h2_adiabatic_raw{stage_suffix}"
+    results_stage = f"h2_adiabatic{stage_suffix}"
 
     ed_results = ed_baseline(config.H2_ADIABATIC_N, config.H2_H_VALUES, J=config.J)
 
@@ -238,7 +267,7 @@ def run_phase_transition(local=False):
           f"h_target/J in {h_values} (batched), dt={dt_by_target}, "
           f"ramp_steps={ramp_steps_by_target} (rate_ref={config.H2_ADIABATIC_RATE_REF}, "
           f"capped at {config.H2_ADIABATIC_MAX_STEPS}), shots={config.H2_ADIABATIC_SHOTS} "
-          f"to {config.H2_DEVICE_NAME} ...")
+          f"to {device_name} ...")
 
     # One compile/execute call for the whole h/J sweep instead of one per h
     # -- see submit_adiabatic_batch's docstring for why (Quantinuum's own
@@ -246,7 +275,7 @@ def run_phase_transition(local=False):
     raw_by_h = submit_adiabatic_batch(
         config.H2_ADIABATIC_N, h_values, config.J, ramp_steps_by_target,
         dt_by_target, config.H2_ADIABATIC_SHOTS, config.H_INIT,
-        device_name=config.H2_DEVICE_NAME, project_name=config.H2_PROJECT_NAME,
+        device_name=device_name, project_name=config.H2_PROJECT_NAME,
     )
 
     # Persist the raw hardware result immediately -- before any
@@ -284,13 +313,13 @@ def run_phase_transition(local=False):
 
     plot_h2_phase_transition(
         config.H2_H_VALUES, results, ed_results, save_dir=config.PLOT_SAVE_DIR,
-        filename="h2_phase_transition_local.png" if local else "h2_phase_transition.png",
+        filename=f"h2_phase_transition{stage_suffix}.png",
     )
 
     return results
 
 
-def run_vqe(local=False):
+def run_vqe(local=False, noisy=False):
     """VQE ground-state search on H2: config.H2_VQE_ANSATZ (default "hva",
     the Hamiltonian Variational Ansatz) optimized via gradient-free COBYLA
     (see vqe.run_vqe_h2), one independent optimization per h/J target --
@@ -305,10 +334,15 @@ def run_vqe(local=False):
     instead -- free and instant, same computation. Gated by
     config.RUN_ON_H2_EMULATOR only when local=False.
     """
+    device_name = config.H2_DEVICE_NAME_NOISY if (noisy and not local) else config.H2_DEVICE_NAME
     print("=" * 60)
-    print(f"H2 VQE GROUND-STATE SEARCH ({config.H2_DEVICE_NAME}, "
+    print(f"H2 VQE GROUND-STATE SEARCH ({device_name}, "
           f"{'local pytket-quantinuum/pecos' if local else 'qnexus/pytket'})")
     print("=" * 60)
+
+    if noisy and local:
+        print("Note: noisy=True has no effect when local=True -- see run()'s "
+              "module-level note. Running local H2-1LE as usual.")
 
     if not local and not config.RUN_ON_H2_EMULATOR:
         print("Skipped (config.RUN_ON_H2_EMULATOR = False). Enable it to submit "
@@ -321,8 +355,9 @@ def run_vqe(local=False):
         from local_emulator_backend import submit_vqe_batch_job
     else:
         from qnexus_backend import submit_vqe_batch_job
-    raw_stage = "h2_vqe_raw_local" if local else "h2_vqe_raw"
-    results_stage = "h2_vqe_local" if local else "h2_vqe"
+    stage_suffix = "_local" if local else ("_noisy" if noisy else "")
+    raw_stage = f"h2_vqe_raw{stage_suffix}"
+    results_stage = f"h2_vqe{stage_suffix}"
 
     # Local runs cost no quota, so they can afford the much larger shots/iters
     # budget COBYLA actually needs to converge a 36-parameter HEA (see
@@ -337,12 +372,12 @@ def run_vqe(local=False):
     for h in config.H2_H_VALUES:
         print(f"\nRunning VQE: N={config.H2_VQE_N}, h/J={h:.2f}, "
               f"max_iters={max_iters}, shots={shots} "
-              f"on {config.H2_DEVICE_NAME} ...")
+              f"on {device_name} ...")
 
         vqe_result = run_vqe_h2(
             config.H2_VQE_N, h, config.J, shots,
             max_iters, config.H2_VQE_TOL, config.H2_VQE_SEED,
-            device_name=config.H2_DEVICE_NAME, project_name=config.H2_PROJECT_NAME,
+            device_name=device_name, project_name=config.H2_PROJECT_NAME,
             submit_fn=submit_vqe_batch_job, raw_stage=raw_stage,
             ansatz=config.H2_VQE_ANSATZ, p=config.H2_VQE_P,
         )
@@ -363,7 +398,7 @@ def run_vqe(local=False):
 
     plot_vqe_convergence(
         config.H2_H_VALUES, results, ed_results, save_dir=config.PLOT_SAVE_DIR,
-        filename="vqe_convergence_local.png" if local else "vqe_convergence.png",
+        filename=f"vqe_convergence{stage_suffix}.png",
     )
 
     phase_transition_data = {
@@ -376,18 +411,21 @@ def run_vqe(local=False):
     plot_h2_phase_transition(
         config.H2_H_VALUES, phase_transition_data, ed_results, save_dir=config.PLOT_SAVE_DIR,
         method_label="VQE",
-        filename="h2_phase_transition_vqe_local.png" if local else "h2_phase_transition_vqe.png",
+        filename=f"h2_phase_transition_vqe{stage_suffix}.png",
     )
 
     return results
 
 
-def load_last_run(local=False):
+def load_last_run(local=False, noisy=False):
     """Convenience accessor for the most recent saved H2 results (raw shots
     and processed observables), without spending any quota. Pass
     local=True to read back local_emulator_backend runs instead of qnexus
-    ones (they're saved under separate "_local"-suffixed stage names)."""
-    suffix = "_local" if local else ""
+    ones, or noisy=True to read back H2-Emulator (noisy qnexus) runs instead of
+    H2-1LE ones -- each combination is saved under its own suffixed stage
+    name. noisy is ignored when local=True (see run()'s module-level note:
+    there is no local-noisy combination)."""
+    suffix = "_local" if local else ("_noisy" if noisy else "")
     return {
         "raw": load_latest(f"h2_emulator_raw{suffix}"),
         "processed": load_latest(f"h2_emulator{suffix}"),
@@ -401,9 +439,10 @@ def load_last_run(local=False):
 if __name__ == "__main__":
     import sys
     is_local = "--local" in sys.argv
+    is_noisy = "--noisy" in sys.argv
     if "--phase-transition" in sys.argv:
-        run_phase_transition(local=is_local)
+        run_phase_transition(local=is_local, noisy=is_noisy)
     elif "--vqe" in sys.argv:
-        run_vqe(local=is_local)
+        run_vqe(local=is_local, noisy=is_noisy)
     else:
-        run(local=is_local)
+        run(local=is_local, noisy=is_noisy)
