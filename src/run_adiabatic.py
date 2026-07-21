@@ -1,7 +1,7 @@
 """
 run_adiabatic.py
 
-Capstone section 2/4: adiabatic Trotter sweep -- the "quantum implementation"
+Capstone section 2/5: adiabatic Trotter sweep -- the "quantum implementation"
 run locally as a noiseless Qiskit statevector simulation. Ramps h from
 config.H_INIT to each config.H_VALUES target, compares the final state
 against the ED ground state, and saves adiabatic_convergence.png /
@@ -21,7 +21,7 @@ from persistence import save_stage_results
 
 def run():
     print("=" * 60)
-    print("STAGE 2/4: ADIABATIC TROTTER SWEEP (LOCAL STATEVECTOR)")
+    print("STAGE 2/5: ADIABATIC TROTTER SWEEP (LOCAL STATEVECTOR)")
     print("=" * 60)
 
     ed_results = ed_baseline(config.N, config.H_VALUES, J=config.J)

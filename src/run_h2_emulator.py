@@ -1,7 +1,7 @@
 """
 run_h2_emulator.py
 
-Capstone section 4/4: TFIM Trotter quench circuit run against H2-1LE, with
+Capstone section 5/5: TFIM Trotter quench circuit run against H2-1LE, with
 the circuit built in pytket (see tket_circuit.py). Two interchangeable
 backends, selected via each function's `local` argument (also `--local` on
 the command line):
@@ -38,7 +38,7 @@ from shot_observables import bitstrings_to_observables, bootstrap_observable_err
 
 def run(local=False):
     print("=" * 60)
-    print(f"STAGE 4/4: QUANTINUUM {config.H2_DEVICE_NAME} EMULATOR "
+    print(f"STAGE 5/5: QUANTINUUM {config.H2_DEVICE_NAME} EMULATOR "
           f"({'local pytket-quantinuum/pecos' if local else 'qnexus/pytket'})")
     print("=" * 60)
 

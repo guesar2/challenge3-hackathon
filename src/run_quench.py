@@ -1,7 +1,7 @@
 """
 run_quench.py
 
-Capstone section 3/4: fixed-Hamiltonian ("quench") time evolution -- ED vs.
+Capstone section 3/5: fixed-Hamiltonian ("quench") time evolution -- ED vs.
 local Trotter (Qiskit statevector), starting from a computational-basis
 product state. This is the pass/fail check for the challenge's <5%
 deviation requirement.
@@ -20,7 +20,7 @@ from persistence import save_stage_results
 
 def run():
     print("=" * 60)
-    print("STAGE 3/4: FIXED-HAMILTONIAN QUENCH (ED vs. LOCAL TROTTER)")
+    print("STAGE 3/5: FIXED-HAMILTONIAN QUENCH (ED vs. LOCAL TROTTER)")
     print("=" * 60)
 
     ed_results = ed_baseline(config.N, config.H_VALUES, J=config.J)

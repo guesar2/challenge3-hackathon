@@ -1,7 +1,7 @@
 """
 run_ed.py
 
-Capstone section 1/4: exact diagonalization (ED) baseline for the TFIM.
+Capstone section 1/5: exact diagonalization (ED) baseline for the TFIM.
 Ground-state observables (<Z>, <X>, <Zi Zi+1>, energy/N) across
 config.H_VALUES at config.N, via sparse eigsh.
 
@@ -16,7 +16,7 @@ from persistence import save_stage_results
 
 def run():
     print("=" * 60)
-    print("STAGE 1/4: EXACT DIAGONALIZATION (ED) BASELINE")
+    print("STAGE 1/5: EXACT DIAGONALIZATION (ED) BASELINE")
     print("=" * 60)
     ed_results = ed_baseline(config.N, config.H_VALUES, J=config.J)
     save_stage_results("ed", {"N": config.N, "J": config.J, "ed_results": ed_results})

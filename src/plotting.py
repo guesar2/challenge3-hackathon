@@ -10,6 +10,7 @@ import os
 
 import matplotlib
 import matplotlib.pyplot as plt
+import numpy as np
 
 
 def _finalize(fig, filename, save_dir):
@@ -107,6 +108,39 @@ def plot_phase_transition(h_values, trotter_data, ed_results, rate_ref, save_dir
     ax4.legend()
 
     _finalize(fig, 'phase_transition.png', save_dir)
+    return fig
+
+
+def plot_dt_convergence(h_values, dt_values, error_data, save_dir=None):
+    """Log-log Trotter error vs. dt, per h/J, with an O(dt^2) reference
+    line -- the symmetrized Rx(theta/2)-Rzz(theta)-Rx(theta/2) layer is a
+    2nd-order Trotter-Suzuki step, so max % deviation from ED at fixed
+    total evolution time should fall roughly as dt^2 (halving dt cuts the
+    error ~4x) if the circuit is actually converging correctly.
+
+    error_data: dict h -> {'dt_values': [...], 'max_pct_z': [...], 'max_pct_mzz': [...]}
+    """
+    fig, (ax_z, ax_mzz) = plt.subplots(1, 2, figsize=(12, 5))
+
+    dt_arr = np.array(sorted(dt_values))
+    for ax, err_key, ylabel, title in [
+        (ax_z, 'max_pct_z', r'Max % deviation in $\langle Z \rangle$', 'Trotter Convergence — <Z>'),
+        (ax_mzz, 'max_pct_mzz', r'Max % deviation in $\langle Z_i Z_{i+1} \rangle$', 'Trotter Convergence — <Zi Zi+1>'),
+    ]:
+        for h in h_values:
+            dts = error_data[h]['dt_values']
+            errs = error_data[h][err_key]
+            ax.loglog(dts, errs, 'o-', markersize=6, label=f'h/J = {h:.1f}')
+        # O(dt^2) reference, anchored to the coarsest point's error scale
+        ref_scale = max(error_data[h][err_key][0] for h in h_values) / dt_arr[-1] ** 2
+        ax.loglog(dt_arr, ref_scale * dt_arr ** 2, 'k--', alpha=0.5, label=r'$O(dt^2)$ reference')
+        ax.set_xlabel('Trotter step size dt')
+        ax.set_ylabel(ylabel)
+        ax.set_title(title)
+        ax.grid(True, which='both', alpha=0.3)
+        ax.legend(fontsize=8)
+
+    _finalize(fig, 'dt_convergence.png', save_dir)
     return fig
 
 
