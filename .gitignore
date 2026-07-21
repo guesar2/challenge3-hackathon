@@ -44,7 +44,7 @@ Thumbs.db
 # Data outputs (keep structure, ignore large files)
 # Uncomment if data files are too large for git
 # data/*.npz
-# data/*.json
+data/*.json
 # figures/*.png
 # figures/*.pdf
 
@@ -52,3 +52,10 @@ Thumbs.db
 *.token
 *.key
 .env
+
+# Claude
+CLAUDE.md
+data/quench_latest.json
+data/h2_emulator_raw_latest.json
+docs/hackathon.pdf
+data/ed_latest.json
