@@ -17,11 +17,13 @@ actual H2-1 hardware, or for a final confirmation run; use
 local_emulator_backend for free, instant iteration against H2-1LE while
 tuning parameters, since neither costs quota there or changes the result.
 
-submit_quench_batch/submit_adiabatic_batch/submit_vqe_batch_job each submit
-a whole family of related circuits (a step-count curve, an h/J sweep, or a
-VQE iteration's measurement circuits) as a single qnx.compile()/qnx.execute()
-call rather than one round trip per circuit, since each qnx.execute() call
-queues independently on Nexus. Quantinuum's own job-batching feature
+submit_quench_batch/submit_adiabatic_batch each submit a whole family of
+related circuits (a step-count curve or an h/J sweep) as a single
+qnx.compile()/qnx.execute() call rather than one round trip per circuit,
+since each qnx.execute() call queues independently on Nexus. VqeSession
+does the analogous thing for VQE, but split into a one-time symbolic
+compile (__init__) and a per-iteration substitute+execute (submit) --
+see its docstring. Quantinuum's own job-batching feature
 (QuantinuumConfig's attempt_batching/batch_id, which keeps consecutive
 *separate* jobs in one queue session) only applies to real hardware devices,
 not emulators like H2-1LE -- consolidating circuits into one execute() call
@@ -250,56 +252,88 @@ def submit_adiabatic_batch(N, h_targets, J, ramp_steps_by_target, dt_by_target, 
     return out
 
 
-def submit_vqe_batch_job(circuits, n_shots, device_name="H2-1LE",
-                          project_name="ftim-hackathon", job_name=None):
-    """Upload, compile, and execute a batch of circuits (one VQE
-    iteration's worth of measurement-basis circuits) in a single compile
-    job and a single execute job, rather than one round trip per circuit.
+class VqeSession:
+    """One VQE run's compiled circuit family, compiled once (symbolically)
+    and re-executed every COBYLA iteration by substituting that iteration's
+    parameter values, rather than re-uploading and re-compiling from
+    scratch each time (the pattern the old submit_vqe_batch_job used).
 
-    This is the Nexus-layer equivalent of the batching pattern in
-    Quantinuum's variational-experiment reference (start_batch/add_to_batch
-    on a raw pytket-quantinuum Backend): qnx.compile()/qnx.execute() both
-    natively accept lists of circuit refs / shot counts, so submitting the
-    whole batch as one call amortizes the per-job overhead across all of an
-    iteration's measurement circuits.
+    Following Quantinuum's own VQE reference
+    (docs.quantinuum.com/nexus/trainings/notebooks/knowledge_articles/vqe_example.html):
+    it builds the ansatz once with free (sympy) symbols, compiles that
+    symbolic circuit to the backend's native gateset a single time, then
+    each iteration does circuit.symbol_substitution(...) on the
+    already-compiled circuit before submitting -- gateset rebasing/routing
+    doesn't depend on the parameter values for a fixed-structure ansatz
+    like HEA or HVA, so redoing it every iteration (as the float-parameter
+    version of this module did) was wasted qnx.compile() round trips.
 
-    circuits: list of pytket Circuits (already measured -- e.g. one
-    Z-basis and one X-basis circuit for the TFIM's two commuting
-    measurement groups).
-
-    Returns a list of bitstring-lists, one per input circuit, in the same
-    order as `circuits`.
+    symbolic_circuits: list of pytket Circuits built with sympy Symbol
+    parameters (e.g. ansatz + one measurement-basis group each), matching
+    tket_circuit.build_hea_ansatz_circuit/build_hva_ansatz_circuit called
+    with Symbols instead of floats.
     """
-    project = get_project(project_name)
-    job_name = job_name or "tfim-vqe-batch"
 
-    circuit_refs = [
-        qnx.circuits.upload(
-            circuit=circ,
-            name=f"{job_name}-{i}",
-            project=project,
-            description=f"VQE batch circuit {i}/{len(circuits)}",
+    def __init__(self, symbolic_circuits, device_name="H2-1LE",
+                 project_name="ftim-hackathon", job_name=None):
+        self.project = get_project(project_name)
+        self.job_name = job_name or "tfim-vqe"
+        self.backend_config = qnx.QuantinuumConfig(device_name=device_name)
+
+        circuit_refs = [
+            qnx.circuits.upload(
+                circuit=circ,
+                name=f"{self.job_name}-symbolic-{i}",
+                project=self.project,
+                description=f"VQE symbolic ansatz+measurement circuit {i}/{len(symbolic_circuits)}",
+            )
+            for i, circ in enumerate(symbolic_circuits)
+        ]
+        compiled_refs = qnx.compile(
+            programs=circuit_refs,
+            backend_config=self.backend_config,
+            name=f"{self.job_name}-compile",
+            project=self.project,
         )
-        for i, circ in enumerate(circuits)
-    ]
+        # Pull the compiled (native-gateset, routed) circuits back down so
+        # symbol_substitution can run locally each iteration without
+        # another Nexus compile job.
+        self.compiled_circuits = [ref.download_circuit() for ref in compiled_refs]
 
-    backend_config = qnx.QuantinuumConfig(device_name=device_name)
-    compiled_refs = qnx.compile(
-        programs=circuit_refs,
-        backend_config=backend_config,
-        name=f"{job_name}-compile",
-        project=project,
-    )
+    def submit(self, symbol_map, n_shots, iteration=0):
+        """Substitute one iteration's parameter values into the
+        once-compiled circuits and execute -- no recompile.
 
-    results = qnx.execute(
-        programs=list(compiled_refs),
-        n_shots=[n_shots] * len(compiled_refs),
-        backend_config=backend_config,
-        name=job_name,
-        project=project,
-    )
+        symbol_map: {sympy.Symbol: float} for every free symbol used when
+        building the symbolic circuits passed to __init__.
 
-    return [
-        ["".join(str(bit) for bit in shot) for shot in r.get_shots()]
-        for r in results
-    ]
+        Returns a list of bitstring-lists, one per compiled circuit, in
+        the same order as the `symbolic_circuits` passed to __init__.
+        """
+        substituted = []
+        for circ in self.compiled_circuits:
+            c = circ.copy()
+            c.symbol_substitution(symbol_map)
+            substituted.append(c)
+
+        circuit_refs = [
+            qnx.circuits.upload(
+                circuit=c,
+                name=f"{self.job_name}-iter{iteration}-{i}",
+                project=self.project,
+                description=f"VQE iteration {iteration} circuit {i}/{len(substituted)}",
+            )
+            for i, c in enumerate(substituted)
+        ]
+        results = qnx.execute(
+            programs=circuit_refs,
+            n_shots=[n_shots] * len(circuit_refs),
+            backend_config=self.backend_config,
+            name=f"{self.job_name}-iter{iteration}",
+            project=self.project,
+        )
+
+        return [
+            ["".join(str(bit) for bit in shot) for shot in r.get_shots()]
+            for r in results
+        ]
