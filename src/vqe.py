@@ -79,7 +79,7 @@ def energy_from_batch(measurement_setup, operator, bitstring_lists):
 
 def run_vqe_h2(N, h_target, J, n_shots, max_iters, tol, seed, device_name="H2-1LE",
                project_name="ftim-hackathon", submit_fn=submit_vqe_batch_job, raw_stage="h2_vqe_raw",
-               ansatz="hea", p=None):
+               ansatz="hea", p=None, fixed_params=None):
     """Run one VQE ground-state search (fixed h_target) against the H2
     emulator: COBYLA over the ansatz's parameters, one batched
     Z-basis+X-basis circuit submission per iteration.
@@ -167,14 +167,21 @@ def run_vqe_h2(N, h_target, J, n_shots, max_iters, tol, seed, device_name="H2-1L
             best['bitstring_lists'] = bitstring_lists
 
         return energy
+    if fixed_params is not None:
+        params_array = np.asarray(fixed_params)
+        objective(params_array)
+        result_x = params_array
 
-    random.seed(seed)
-    initial_params = np.array([2 * np.pi * random.uniform(0, 1) for _ in range(num_params)])
+    else: 
+        
+        random.seed(seed)
+        initial_params = np.array([2 * np.pi * random.uniform(0, 1) for _ in range(num_params)])
 
-    result = minimize(
-        objective, initial_params, method="COBYLA",
-        options={"disp": True, "maxiter": max_iters}, tol=tol,
-    )
+        result = minimize(
+            objective, initial_params, method="COBYLA",
+            options={"disp": True, "maxiter": max_iters}, tol=tol,
+        )
+        result_x = result.x
 
     # Reuse the Z-basis circuit's shots from the best iteration found
     # (already collected as part of that objective evaluation) rather than
@@ -185,7 +192,7 @@ def run_vqe_h2(N, h_target, J, n_shots, max_iters, tol, seed, device_name="H2-1L
 
     return {
         'energy_history': energy_history,
-        'final_params': result.x.tolist(),
+        'final_params': result_x.tolist(),
         'final_energy': best['energy'],
         'final_z_rms': z_rms, 'final_z_err': z_err,
         'final_mzz': mzz, 'final_mzz_err': mzz_err,

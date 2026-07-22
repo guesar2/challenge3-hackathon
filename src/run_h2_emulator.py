@@ -54,6 +54,10 @@ from shot_observables import (
     bitstrings_to_mx, bootstrap_mx_error,
 )
 
+from vqe import run_vqe_h2
+from local_emulator_backend import submit_vqe_batch_job as local_submit
+from qnexus_backend import submit_vqe_batch_job as nexus_submit
+
 
 def run(local=False, noisy=False):
     device_name = config.H2_DEVICE_NAME_NOISY if (noisy and not local) else config.H2_DEVICE_NAME
@@ -406,6 +410,58 @@ def run_vqe(local=False, noisy=False):
     return results
 
 
+
+def run_vqe_hybrid(noisy = False):
+    """Hybrid VQE: converge locally for free, the confirm with one real submission to Nexus at the best parameters found."""
+
+    if not config.RUN_ON_H2_EMULATOR:
+        print("Skipped confirmation step (config.RUN_ON_H2_EMULATOR = False). Enable it first.")
+        return None 
+
+    device_name = config.H2_DEVICE_NAME_NOISY if noisy else config.H2_DEVICE_NAME
+    print("="*60)
+    print(f"H2 VQE HYBRID (local optimization -> {device_name} confirmation)")
+    print("=" * 60)
+
+    ed_results = ed_baseline(config.H2_VQE_N, config.H2_H_VALUES, J = config.J)
+
+    results = {}
+    for h in config.H2_H_VALUES:
+        print(f"\n[1/2] Converging locally: N={config.H2_VQE_N}, h/J={h:.2f}, "
+              f"max_iters={config.H2_VQE_MAX_ITERS_LOCAL} (free, local)...")
+        local_result = run_vqe_h2(
+            config.H2_VQE_N, h, config.J, config.H2_VQE_SHOTS_LOCAL,
+            config.H2_VQE_MAX_ITERS_LOCAL, config.H2_VQE_TOL, config.H2_VQE_SEED,
+            submit_fn=local_submit, raw_stage="h2_vqe_raw_local",
+            ansatz=config.H2_VQE_ANSATZ, p=config.H2_VQE_P,
+            )
+
+        print(f"      Local best energy = {local_result['final_energy']:.4f}")
+
+        print(f"[2/2] Confirming on {device_name} (real, ONE submission)...")
+        confirm_result = run_vqe_h2(
+            config.H2_VQE_N, h, config.J, config.H2_VQE_SHOTS,
+            1, config.H2_VQE_TOL, config.H2_VQE_SEED,
+            device_name=device_name, project_name=config.H2_PROJECT_NAME,
+            submit_fn=nexus_submit, raw_stage="h2_vqe_raw_hybrid",
+            ansatz=config.H2_VQE_ANSATZ, p=config.H2_VQE_P,
+            fixed_params=local_result['final_params'],
+        )
+
+        ed_energy = next(r['energy'] for r in ed_results if r['h'] == h)* config.H2_VQE_N
+        pct_energy = abs(confirm_result['final_energy'] - ed_energy) / abs(ed_energy) * 100 if ed_energy != 0 else 0
+        print(f"      Confirmed energy = {confirm_result['final_energy']:.4f}  "
+              f"(ED = {ed_energy:.4f}, {pct_energy:.2f}% diff)")
+
+        results[h] = confirm_result
+
+    save_stage_results("h2_vqe_hybrid", results)
+    return results
+
+
+
+
+
 def load_last_run(local=False, noisy=False):
     """Convenience accessor for the most recent saved H2 results (raw shots
     and processed observables), without spending any quota. Pass
@@ -431,6 +487,8 @@ if __name__ == "__main__":
     is_noisy = "--noisy" in sys.argv
     if "--phase-transition" in sys.argv:
         run_phase_transition(local=is_local, noisy=is_noisy)
+    elif "--vqe" in sys.argv and "--hybrid" in sys.argv:
+        run_vqe_hybrid(noisy=is_noisy)
     elif "--vqe" in sys.argv:
         run_vqe(local=is_local, noisy=is_noisy)
     else:
