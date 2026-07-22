@@ -55,13 +55,21 @@ from shot_observables import (
 )
 
 
-def run(local=False, noisy=False, n=None):
-    """n: override config.H2_N for this call (e.g. for a cross-N noise scan)
-    without touching config.py. Stage names and the saved figure filename
-    include N whenever n differs from config.H2_N, so runs at different N
-    never overwrite each other's data/plots.
+def run(local=False, noisy=False, n=None, steps=None, shots=None, timeout=None):
+    """n/steps/shots: override config.H2_N/H2_STEPS/H2_SHOTS for this call
+    (e.g. for a cross-N noise scan, or a fixed-N deeper-circuit scan) without
+    touching config.py. Stage names and the saved figure filename include
+    whichever of N/steps differ from their config default, so differently
+    configured runs never overwrite each other's data/plots.
+
+    timeout: seconds qnx.execute() blocks per h-value before raising
+    TimeoutError (qnexus_backend.submit_quench_batch's own default is 300s
+    -- too short for a deep/high-shot batch, e.g. steps=30 at 2000 shots).
+    Ignored when local=True (local_emulator_backend has no such wait).
     """
     n = config.H2_N if n is None else n
+    steps = config.H2_STEPS if steps is None else steps
+    shots = config.H2_SHOTS if shots is None else shots
     device_name = config.H2_DEVICE_NAME_NOISY if (noisy and not local) else config.H2_DEVICE_NAME
     print("=" * 60)
     print(f"STAGE 6/6: QUANTINUUM {device_name} EMULATOR "
@@ -86,6 +94,8 @@ def run(local=False, noisy=False, n=None):
     stage_suffix = "_local" if local else ("_noisy" if noisy else "")
     if n != config.H2_N:
         stage_suffix += f"_N{n}"
+    if steps != config.H2_STEPS:
+        stage_suffix += f"_S{steps}"
     raw_stage = f"h2_emulator_raw{stage_suffix}"
     results_stage = f"h2_emulator{stage_suffix}"
 
@@ -98,16 +108,20 @@ def run(local=False, noisy=False, n=None):
     # emulator devices.
     raw_by_h = {}
     results = {}
-    step_counts = list(range(1, config.H2_STEPS + 1))
+    step_counts = list(range(1, steps + 1))
     for h in config.H2_H_VALUES:
         print(f"\nSubmitting N={n}, h/J={h:.2f}, dt={config.H2_DT}, "
-              f"steps=1..{config.H2_STEPS} (batched), shots={config.H2_SHOTS} "
+              f"steps=1..{steps} (batched), shots={shots} "
               f"to {device_name} ...")
 
+        batch_kwargs = {}
+        if not local and timeout is not None:
+            batch_kwargs["timeout"] = timeout
         batch_results = submit_quench_batch(
             n, h, config.J, config.H2_DT, step_counts,
-            config.H2_SHOTS, device_name=device_name,
+            shots, device_name=device_name,
             project_name=config.H2_PROJECT_NAME,
+            **batch_kwargs,
         )
 
         # Persist the raw hardware result immediately -- before any
@@ -137,7 +151,7 @@ def run(local=False, noisy=False, n=None):
             mzz_err.append(mzz_se)
 
         _, z_ed, mzz_ed, x_ed = ed_time_evolution_exact(
-            n, h, config.J, config.H2_DT, config.H2_STEPS
+            n, h, config.J, config.H2_DT, steps
         )
 
         max_pct_z = max(abs(a - b) / abs(b) * 100 if b != 0 else 0
@@ -440,9 +454,15 @@ if __name__ == "__main__":
     n_override = None
     if "--n" in sys.argv:
         n_override = int(sys.argv[sys.argv.index("--n") + 1])
+    steps_override = None
+    if "--steps" in sys.argv:
+        steps_override = int(sys.argv[sys.argv.index("--steps") + 1])
+    shots_override = None
+    if "--shots" in sys.argv:
+        shots_override = int(sys.argv[sys.argv.index("--shots") + 1])
     if "--phase-transition" in sys.argv:
         run_phase_transition(local=is_local, noisy=is_noisy)
     elif "--vqe" in sys.argv:
         run_vqe(local=is_local, noisy=is_noisy)
     else:
-        run(local=is_local, noisy=is_noisy, n=n_override)
+        run(local=is_local, noisy=is_noisy, n=n_override, steps=steps_override, shots=shots_override)
