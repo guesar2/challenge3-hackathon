@@ -400,6 +400,53 @@ def plot_h2_noise_comparison(h_values, noiseless_data, noisy_data, save_dir=None
     return fig
 
 
+def plot_zne_comparison(h_values, zne_data, save_dir=None, n=None,
+                         filename="h2_zne_comparison.png"):
+    """<Z>, <X>, and <Zi Zi+1> at one fixed (h, step_count) point per h/J: ED
+    (exact) vs. raw-noisy H2-Emulator (qermit Folding.circuit's fold_factor=1,
+    with a real bootstrap error bar) vs. ZNE-mitigated (zne_fit.zne_extrapolate's
+    zero-noise-limit fit, with its own propagated error bar). Unlike
+    plot_h2_noise_comparison, this plots single points per h (not a
+    times-series curve), since ZNE here targets one fixed circuit depth --
+    see run_zne.run()'s docstring.
+
+    zne_data: dict h -> {'z_ed','x_ed','mzz_ed', 'z_raw','z_raw_err',
+    'x_raw','x_raw_err','mzz_raw','mzz_raw_err', 'z_zne','z_zne_err',
+    'x_zne','x_zne_err','mzz_zne','mzz_zne_err'}, as produced by
+    run_zne.run()'s `results`.
+    """
+    fig, axes = plt.subplots(len(h_values), 3, figsize=(17, 4 * len(h_values)))
+
+    for idx, h in enumerate(h_values):
+        r = zne_data[h]
+        row = axes[idx] if len(h_values) > 1 else axes
+
+        panels = (
+            (row[0], 'z', r'$\langle Z \rangle$ (RMS per site)'),
+            (row[1], 'x', r'$\langle X \rangle$ (mean per site)'),
+            (row[2], 'mzz', r'$\langle Z_i Z_{i+1} \rangle$'),
+        )
+        for ax, key, ylabel in panels:
+            ax.axhline(r[f'{key}_ed'], color='r', linewidth=2, label='ED (exact)')
+            ax.errorbar([0], [r[f'{key}_raw']], yerr=[r[f'{key}_raw_err']], fmt='m^',
+                        markersize=10, capsize=4, label='H2-Emulator (raw noisy)')
+            ax.errorbar([1], [r[f'{key}_zne']], yerr=[r[f'{key}_zne_err']], fmt='go',
+                        markersize=10, capsize=4, label='ZNE-mitigated')
+            ax.set_xticks([0, 1])
+            ax.set_xticklabels(['raw', 'ZNE'])
+            ax.set_xlim(-0.5, 1.5)
+            ax.set_ylabel(ylabel)
+            ax.set_title(f'h/J = {h:.1f}' + (f', N={n}' if n is not None else ''))
+            ax.grid(True, alpha=0.3)
+            ax.legend(loc='best', fontsize=8)
+
+    title = 'ED vs. raw-noisy vs. ZNE-mitigated (H2-Emulator)' + (f' -- N={n}' if n is not None else '')
+    fig.suptitle(title, fontsize=11)
+
+    _finalize(fig, filename, save_dir)
+    return fig
+
+
 def plot_h2_phase_transition(h_values, h2_data, ed_results, save_dir=None, saved_at=None,
                               method_label="adiabatic", filename="h2_phase_transition.png"):
     """<Z>, <X>, and <Zi Zi+1> vs. h/J for an H2 ground-state-search protocol

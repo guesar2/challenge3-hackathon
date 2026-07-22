@@ -217,4 +217,23 @@ H2_VQE_SEED = 10             # matches the reference snippet's random.seed(a=10)
 # (measured ~36-46 evals for HVA, ~500 for the HEA fallback), so a high
 # ceiling costs nothing but a little wasted time if never reached.
 H2_VQE_SHOTS_LOCAL = 4000
+
+# H2 Zero-Noise Extrapolation (run_zne.py), via qermit's Folding.circuit
+# (qnexus_backend.submit_zne_batch) -- amplifies noise by folding the
+# circuit (C -> C C^-1 C ...) rather than the device's own error-rate
+# scale knob (config's noise_scale kwarg elsewhere), then extrapolates
+# back to the zero-noise limit (zne_fit.zne_extrapolate). Targets
+# run_noise_scaling.SHORT_TIME_N/SHORT_TIME_STEPS (N=8, steps=5, T=0.5) by
+# default -- see run_zne.run()'s docstring.
+H2_ZNE_FOLD_FACTORS = (1, 3, 5)   # ODD integers only -- Folding.circuit raises
+                             # otherwise. fold_factor=1 performs zero fold
+                             # iterations (verified) -- i.e. it IS the plain
+                             # raw-noisy circuit, not a separate submission.
+H2_ZNE_SHOTS = 2000          # shots PER fold factor -- same shot-noise-vs-
+                             # signal-size rationale as run_noise_scaling.
+                             # DEPTH_SCALING_SHOTS (total shots per h is
+                             # H2_ZNE_SHOTS * len(H2_ZNE_FOLD_FACTORS))
+H2_ZNE_FIT_DEG = 1           # zero-noise extrapolation polynomial degree
+                             # (1 = linear fit, ZNE's most common choice;
+                             # must be < len(H2_ZNE_FOLD_FACTORS))
 H2_VQE_MAX_ITERS_LOCAL = 500

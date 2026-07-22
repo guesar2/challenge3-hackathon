@@ -38,10 +38,14 @@ Nothing in this module executes on import. It's only invoked from
 ftim_main.py when config.RUN_ON_H2_EMULATOR is explicitly set to True.
 """
 import qnexus as qnx
+from qermit.zero_noise_extrapolation.zne import Folding
 from quantinuum_schemas.models.quantinuum_systems_noise import UserErrorParams
 
 from circuits import build_chain_color_edges
-from tket_circuit import build_quench_circuit, build_adiabatic_circuit
+from tket_circuit import (
+    append_basis_measurement, build_adiabatic_circuit, build_quench_ansatz_circuit,
+    build_quench_circuit,
+)
 
 
 def get_project(project_name: str):
@@ -173,6 +177,88 @@ def submit_quench_batch(N, h_field, J, dt, step_counts, n_shots, device_name="H2
             "noise_scale": noise_scale,
         }
     return out
+
+
+def submit_zne_batch(N, h_field, J, dt, steps, fold_factors, n_shots, device_name="H2-Emulator",
+                      mirror=True, initial_state_label=None, project_name="ftim-hackathon",
+                      job_name=None, timeout=300.0, noise_scale=None):
+    """Build, upload, and run one Trotter quench ansatz, folded by every factor
+    in `fold_factors` (qermit's Folding.circuit -- e.g. (1, 3, 5), ODD integers
+    only -- see Folding.circuit's own ValueError otherwise), each measured in
+    both Z and X basis, as a single compile/execute batch -- same batching
+    rationale as submit_quench_batch, just folding-scaled instead of
+    step-count-scaled.
+
+    fold_factors: noise-scaling multipliers for Folding.circuit. Folding.circuit
+    with noise_scaling=1 performs zero fold iterations and returns the plain
+    unfolded circuit unchanged (verified directly) -- so fold_factors=1 IS the
+    raw-noisy baseline circuit, not a separate submission.
+
+    Folded circuits are still built from the same native Rx/ZZPhase gate types
+    as every other circuit this module submits (Folding.circuit inverts gates
+    via their own .dagger, it doesn't introduce new gate types), so they
+    compile to H2's native gateset the same way via qnx.compile() below -- no
+    local rebase pass is needed here, unlike a design that folds circuits
+    outside of a submission batch.
+
+    noise_scale: optional linear multiplier on H2-Emulator's default error
+    rates (UserErrorParams(scale=...), same meaning as submit_quench_batch's
+    noise_scale) -- independent of fold_factors: this scales the *device's*
+    noise model, fold_factors scales noise via *circuit* folding. Two
+    different knobs, kept distinctly named on purpose.
+
+    Returns {fold_factor: {"bitstrings": [...], "bitstrings_x": [...]}},
+    matching submit_quench_batch's per-key shape so callers can reuse
+    shot_observables.py's bitstrings_to_observables/bitstrings_to_mx/
+    bootstrap_* functions unchanged.
+    """
+    color_edges = build_chain_color_edges(N)
+    project = get_project(project_name)
+    job_name = job_name or f"tfim-zne-N{N}-h{h_field:.2f}"
+
+    ansatz = build_quench_ansatz_circuit(N, color_edges, steps, dt, h_field, J, mirror=mirror,
+                                          initial_state_label=initial_state_label)
+
+    bases = ("z", "x")
+    jobs = [(fold, basis) for fold in fold_factors for basis in bases]
+    circuits = []
+    for fold, basis in jobs:
+        folded = Folding.circuit(ansatz, fold)[0]
+        append_basis_measurement(folded, N, basis)
+        circuits.append(folded)
+
+    circuit_refs = [
+        qnx.circuits.upload(
+            circuit=circ, name=f"{job_name}-fold{fold}-{basis}", project=project,
+            description=(f"ZNE-folded TFIM quench: N={N}, h/J={h_field / J:.2f}, "
+                          f"dt={dt}, steps={steps}, fold={fold}, basis={basis}"),
+        )
+        for (fold, basis), circ in zip(jobs, circuits)
+    ]
+
+    config_kwargs = {}
+    if noise_scale is not None:
+        config_kwargs["error_params"] = UserErrorParams(scale=noise_scale)
+    backend_config = qnx.QuantinuumConfig(device_name=device_name, **config_kwargs)
+
+    compiled_refs = qnx.compile(
+        programs=circuit_refs, backend_config=backend_config,
+        name=f"{job_name}-compile", project=project,
+    )
+
+    results = qnx.execute(
+        programs=list(compiled_refs), n_shots=[n_shots] * len(compiled_refs),
+        backend_config=backend_config, name=job_name, project=project, timeout=timeout,
+    )
+
+    bitstrings_by = {}
+    for (fold, basis), result in zip(jobs, results):
+        bitstrings_by[(fold, basis)] = ["".join(str(bit) for bit in shot) for shot in result.get_shots()]
+
+    return {
+        fold: {"bitstrings": bitstrings_by[(fold, "z")], "bitstrings_x": bitstrings_by[(fold, "x")]}
+        for fold in fold_factors
+    }
 
 
 def submit_adiabatic_batch(N, h_targets, J, ramp_steps_by_target, dt_by_target, n_shots, h_init,
