@@ -336,6 +336,70 @@ def plot_h2_vs_ed_time(h_values, time_series_data, save_dir=None, saved_at=None,
     return fig
 
 
+def plot_h2_noise_comparison(h_values, noiseless_data, noisy_data, save_dir=None,
+                              n=None, filename="h2_noise_comparison.png"):
+    """<Z>, <X>, and <Zi Zi+1> vs. time for the H2 emulator quench, overlaying
+    ED (exact), noiseless H2-1LE, and noisy H2-Emulator on the same axes so
+    the noisy-vs-noiseless gap (hardware noise, with Trotter error cancelled
+    since both ran the identical circuit) is visible directly, rather than
+    inferred from two separate noisy-vs-ED and noiseless-vs-ED figures.
+
+    noiseless_data / noisy_data: dicts h -> {...} in the same shape as
+    run_h2_emulator.run()'s `results` (see plot_h2_vs_ed_time's docstring)
+    -- both are expected to come from the same N/h/dt/steps configuration,
+    so their 'z_ed'/'x_ed'/'mzz_ed' and 'times' entries coincide; ED is
+    plotted once per panel from noiseless_data.
+    """
+    fig, axes = plt.subplots(len(h_values), 3, figsize=(17, 4 * len(h_values)))
+
+    for idx, h in enumerate(h_values):
+        r0 = noiseless_data[h]
+        r1 = noisy_data[h]
+        row = axes[idx] if len(h_values) > 1 else axes
+
+        ax1 = row[0]
+        ax1.plot(r0['times'], r0['z_ed'], 'r-', linewidth=2, label='ED (exact)')
+        ax1.errorbar(r0['times'], r0['z_h2'], yerr=r0['z_err'], fmt='bo', markersize=6,
+                     capsize=4, label='H2-1LE (noiseless)')
+        ax1.errorbar(r1['times'], r1['z_h2'], yerr=r1['z_err'], fmt='m^', markersize=6,
+                     capsize=4, label='H2-Emulator (noisy)')
+        ax1.set_xlabel('Time t')
+        ax1.set_ylabel(r'$\langle Z \rangle$ (RMS per site)')
+        ax1.set_title(f'h/J = {h:.1f}' + (f', N={n}' if n is not None else ''))
+        ax1.grid(True, alpha=0.3)
+        ax1.legend(loc='best', fontsize=8)
+
+        ax2 = row[1]
+        ax2.plot(r0['times'], r0['x_ed'], 'r-', linewidth=2, label='ED (exact)')
+        ax2.errorbar(r0['times'], r0['x_h2'], yerr=r0['x_err'], fmt='go', markersize=6,
+                     capsize=4, label='H2-1LE (noiseless)')
+        ax2.errorbar(r1['times'], r1['x_h2'], yerr=r1['x_err'], fmt='m^', markersize=6,
+                     capsize=4, label='H2-Emulator (noisy)')
+        ax2.set_xlabel('Time t')
+        ax2.set_ylabel(r'$\langle X \rangle$ (mean per site)')
+        ax2.set_title(f'h/J = {h:.1f}' + (f', N={n}' if n is not None else ''))
+        ax2.grid(True, alpha=0.3)
+        ax2.legend(loc='best', fontsize=8)
+
+        ax3 = row[2]
+        ax3.plot(r0['times'], r0['mzz_ed'], 'r-', linewidth=2, label='ED (exact)')
+        ax3.errorbar(r0['times'], r0['mzz_h2'], yerr=r0['mzz_err'], fmt='bo', markersize=6,
+                     capsize=4, label='H2-1LE (noiseless)')
+        ax3.errorbar(r1['times'], r1['mzz_h2'], yerr=r1['mzz_err'], fmt='m^', markersize=6,
+                     capsize=4, label='H2-Emulator (noisy)')
+        ax3.set_xlabel('Time t')
+        ax3.set_ylabel(r'$\langle Z_i Z_{i+1} \rangle$')
+        ax3.set_title(f'h/J = {h:.1f}' + (f', N={n}' if n is not None else ''))
+        ax3.grid(True, alpha=0.3)
+        ax3.legend(loc='best', fontsize=8)
+
+    title = 'ED vs. noiseless (H2-1LE) vs. noisy (H2-Emulator)' + (f' -- N={n}' if n is not None else '')
+    fig.suptitle(title, fontsize=11)
+
+    _finalize(fig, filename, save_dir)
+    return fig
+
+
 def plot_h2_phase_transition(h_values, h2_data, ed_results, save_dir=None, saved_at=None,
                               method_label="adiabatic", filename="h2_phase_transition.png"):
     """<Z>, <X>, and <Zi Zi+1> vs. h/J for an H2 ground-state-search protocol

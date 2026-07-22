@@ -59,7 +59,13 @@ from local_emulator_backend import submit_vqe_batch_job as local_submit
 from qnexus_backend import submit_vqe_batch_job as nexus_submit
 
 
-def run(local=False, noisy=False):
+def run(local=False, noisy=False, n=None):
+    """n: override config.H2_N for this call (e.g. for a cross-N noise scan)
+    without touching config.py. Stage names and the saved figure filename
+    include N whenever n differs from config.H2_N, so runs at different N
+    never overwrite each other's data/plots.
+    """
+    n = config.H2_N if n is None else n
     device_name = config.H2_DEVICE_NAME_NOISY if (noisy and not local) else config.H2_DEVICE_NAME
     print("=" * 60)
     print(f"STAGE 6/6: QUANTINUUM {device_name} EMULATOR "
@@ -82,6 +88,8 @@ def run(local=False, noisy=False):
     else:
         from qnexus_backend import submit_quench_batch
     stage_suffix = "_local" if local else ("_noisy" if noisy else "")
+    if n != config.H2_N:
+        stage_suffix += f"_N{n}"
     raw_stage = f"h2_emulator_raw{stage_suffix}"
     results_stage = f"h2_emulator{stage_suffix}"
 
@@ -96,12 +104,12 @@ def run(local=False, noisy=False):
     results = {}
     step_counts = list(range(1, config.H2_STEPS + 1))
     for h in config.H2_H_VALUES:
-        print(f"\nSubmitting N={config.H2_N}, h/J={h:.2f}, dt={config.H2_DT}, "
+        print(f"\nSubmitting N={n}, h/J={h:.2f}, dt={config.H2_DT}, "
               f"steps=1..{config.H2_STEPS} (batched), shots={config.H2_SHOTS} "
               f"to {device_name} ...")
 
         batch_results = submit_quench_batch(
-            config.H2_N, h, config.J, config.H2_DT, step_counts,
+            n, h, config.J, config.H2_DT, step_counts,
             config.H2_SHOTS, device_name=device_name,
             project_name=config.H2_PROJECT_NAME,
         )
@@ -115,14 +123,14 @@ def run(local=False, noisy=False):
         times, z_h2, z_err, x_h2, x_err, mzz_h2, mzz_err = [], [], [], [], [], [], []
         for step_count in step_counts:
             job_result = batch_results[step_count]
-            z_rms, mzz = bitstrings_to_observables(job_result["bitstrings"], config.H2_N)
-            z_se, mzz_se = bootstrap_observable_errors(job_result["bitstrings"], config.H2_N)
+            z_rms, mzz = bitstrings_to_observables(job_result["bitstrings"], n)
+            z_se, mzz_se = bootstrap_observable_errors(job_result["bitstrings"], n)
             # <X> does not vanish by symmetry the way <Z> does (the -h*X
             # field polarizes the ground state along +X), so it's a plain
             # signed mean over shots -- see bitstrings_to_mx -- not the
             # RMS formula bitstrings_to_observables uses for <Z>.
-            x_mean = bitstrings_to_mx(job_result["bitstrings_x"], config.H2_N)
-            x_se = bootstrap_mx_error(job_result["bitstrings_x"], config.H2_N)
+            x_mean = bitstrings_to_mx(job_result["bitstrings_x"], n)
+            x_se = bootstrap_mx_error(job_result["bitstrings_x"], n)
 
             times.append(step_count * config.H2_DT)
             z_h2.append(z_rms)
@@ -133,7 +141,7 @@ def run(local=False, noisy=False):
             mzz_err.append(mzz_se)
 
         _, z_ed, mzz_ed, x_ed = ed_time_evolution_exact(
-            config.H2_N, h, config.J, config.H2_DT, config.H2_STEPS
+            n, h, config.J, config.H2_DT, config.H2_STEPS
         )
 
         max_pct_z = max(abs(a - b) / abs(b) * 100 if b != 0 else 0
@@ -485,6 +493,9 @@ if __name__ == "__main__":
     import sys
     is_local = "--local" in sys.argv
     is_noisy = "--noisy" in sys.argv
+    n_override = None
+    if "--n" in sys.argv:
+        n_override = int(sys.argv[sys.argv.index("--n") + 1])
     if "--phase-transition" in sys.argv:
         run_phase_transition(local=is_local, noisy=is_noisy)
     elif "--vqe" in sys.argv and "--hybrid" in sys.argv:
@@ -492,4 +503,4 @@ if __name__ == "__main__":
     elif "--vqe" in sys.argv:
         run_vqe(local=is_local, noisy=is_noisy)
     else:
-        run(local=is_local, noisy=is_noisy)
+        run(local=is_local, noisy=is_noisy, n=n_override)
