@@ -55,8 +55,6 @@ from shot_observables import (
 )
 
 from vqe import run_vqe_h2
-from local_emulator_backend import submit_vqe_batch_job as local_submit
-from qnexus_backend import submit_vqe_batch_job as nexus_submit
 
 
 def run(local=False, noisy=False, n=None, steps=None, shots=None, timeout=None, noise_scale=None):
@@ -459,6 +457,9 @@ def run_vqe_hybrid(noisy = False):
     print(f"H2 VQE HYBRID (local optimization -> {device_name} confirmation)")
     print("=" * 60)
 
+    from local_emulator_backend import VqeSession as LocalVqeSession
+    from qnexus_backend import VqeSession as NexusVqeSession
+
     ed_results = ed_baseline(config.H2_VQE_N, config.H2_H_VALUES, J = config.J)
 
     results = {}
@@ -468,7 +469,7 @@ def run_vqe_hybrid(noisy = False):
         local_result = run_vqe_h2(
             config.H2_VQE_N, h, config.J, config.H2_VQE_SHOTS_LOCAL,
             config.H2_VQE_MAX_ITERS_LOCAL, config.H2_VQE_TOL, config.H2_VQE_SEED,
-            submit_fn=local_submit, raw_stage="h2_vqe_raw_local",
+            session_cls=LocalVqeSession, raw_stage="h2_vqe_raw_local",
             ansatz=config.H2_VQE_ANSATZ, p=config.H2_VQE_P,
             )
 
@@ -479,7 +480,7 @@ def run_vqe_hybrid(noisy = False):
             config.H2_VQE_N, h, config.J, config.H2_VQE_SHOTS,
             1, config.H2_VQE_TOL, config.H2_VQE_SEED,
             device_name=device_name, project_name=config.H2_PROJECT_NAME,
-            submit_fn=nexus_submit, raw_stage="h2_vqe_raw_hybrid",
+            session_cls=NexusVqeSession, raw_stage="h2_vqe_raw_hybrid",
             ansatz=config.H2_VQE_ANSATZ, p=config.H2_VQE_P,
             fixed_params=local_result['final_params'],
         )
