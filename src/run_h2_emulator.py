@@ -345,9 +345,9 @@ def run_vqe(local=False, noisy=False):
 
     from vqe import run_vqe_h2
     if local:
-        from local_emulator_backend import submit_vqe_batch_job
+        from local_emulator_backend import VqeSession
     else:
-        from qnexus_backend import submit_vqe_batch_job
+        from qnexus_backend import VqeSession
     stage_suffix = "_local" if local else ("_noisy" if noisy else "")
     raw_stage = f"h2_vqe_raw{stage_suffix}"
     results_stage = f"h2_vqe{stage_suffix}"
@@ -367,7 +367,7 @@ def run_vqe(local=False, noisy=False):
             config.H2_VQE_N, h, config.J, shots,
             max_iters, config.H2_VQE_TOL, config.H2_VQE_SEED,
             device_name=device_name, project_name=config.H2_PROJECT_NAME,
-            submit_fn=submit_vqe_batch_job, raw_stage=raw_stage,
+            session_cls=VqeSession, raw_stage=raw_stage,
             ansatz=config.H2_VQE_ANSATZ, p=config.H2_VQE_P,
         )
 

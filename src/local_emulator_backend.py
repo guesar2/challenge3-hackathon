@@ -127,10 +127,29 @@ def submit_adiabatic_batch(N, h_targets, J, ramp_steps_by_target, dt_by_target, 
     return out
 
 
-def submit_vqe_batch_job(circuits, n_shots, device_name="H2-1LE", project_name=None, job_name=None):
-    """Local equivalent of qnexus_backend.submit_vqe_batch_job -- one
-    compile+execute round trip for a VQE iteration's measurement circuits,
-    executed locally instead of submitted through qnexus.
+class VqeSession:
+    """Local equivalent of qnexus_backend.VqeSession -- compiles the
+    symbolic ansatz+measurement circuits once via
+    backend.get_compiled_circuits(), then every iteration substitutes that
+    iteration's parameter values into the already-compiled circuits and
+    executes locally, instead of recompiling from scratch each time.
     """
-    backend = _get_backend(device_name)
-    return _run_batch(backend, circuits, n_shots)
+
+    def __init__(self, symbolic_circuits, device_name="H2-1LE",
+                 project_name=None, job_name=None):
+        self.backend = _get_backend(device_name)
+        self.compiled_circuits = self.backend.get_compiled_circuits(symbolic_circuits)
+
+    def submit(self, symbol_map, n_shots, iteration=0):
+        substituted = []
+        for circ in self.compiled_circuits:
+            c = circ.copy()
+            c.symbol_substitution(symbol_map)
+            substituted.append(c)
+
+        handles = self.backend.process_circuits(substituted, n_shots=[n_shots] * len(substituted))
+        results = self.backend.get_results(handles)
+        return [
+            ["".join(str(bit) for bit in shot) for shot in r.get_shots()]
+            for r in results
+        ]

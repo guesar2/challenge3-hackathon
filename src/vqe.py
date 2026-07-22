@@ -12,14 +12,22 @@ optimizer step, which is infeasible even absent quota limits.
 
 pytket's measurement_reduction groups the TFIM Hamiltonian's terms into the
 minimum number of commuting measurement circuits (2: all-ZZ in the Z basis,
-all-X in the X basis), and submit_vqe_batch_job (qnexus_backend's by
-default, or local_emulator_backend's -- see run_vqe_h2's submit_fn param)
-submits both of an iteration's circuits in a single compile/execute round
-trip -- the Nexus-layer equivalent of the reference's start_batch/add_to_batch.
+all-X in the X basis). The ansatz is built once with free sympy Symbol
+parameters and compiled once (VqeSession, qnexus_backend's by default, or
+local_emulator_backend's -- see run_vqe_h2's session_cls param) -- matching
+Quantinuum's own VQE reference
+(docs.quantinuum.com/nexus/trainings/notebooks/knowledge_articles/vqe_example.html),
+which also builds a symbolic circuit and substitutes parameter values into
+the already-compiled circuit each iteration rather than rebuilding and
+recompiling a fresh numeric circuit every COBYLA step. VqeSession.submit
+then does that substitute+execute for both of an iteration's measurement
+circuits in a single round trip -- the Nexus-layer equivalent of the
+reference's start_batch/add_to_batch.
 """
 import random
 
 import numpy as np
+import sympy
 from pytket.circuit import Qubit
 from pytket.partition import PauliPartitionStrat, measurement_reduction
 from pytket.pauli import Pauli, QubitPauliString
@@ -29,7 +37,7 @@ from scipy.optimize import minimize
 
 from circuits import build_chain_color_edges
 from persistence import save_stage_results
-from qnexus_backend import submit_vqe_batch_job
+from qnexus_backend import VqeSession
 from shot_observables import bitstrings_to_observables, bootstrap_observable_errors
 from tket_circuit import build_hea_ansatz_circuit, build_hva_ansatz_circuit
 
@@ -78,7 +86,7 @@ def energy_from_batch(measurement_setup, operator, bitstring_lists):
 
 
 def run_vqe_h2(N, h_target, J, n_shots, max_iters, tol, seed, device_name="H2-1LE",
-               project_name="ftim-hackathon", submit_fn=submit_vqe_batch_job, raw_stage="h2_vqe_raw",
+               project_name="ftim-hackathon", session_cls=VqeSession, raw_stage="h2_vqe_raw",
                ansatz="hea", p=None):
     """Run one VQE ground-state search (fixed h_target) against the H2
     emulator: COBYLA over the ansatz's parameters, one batched
@@ -94,10 +102,15 @@ def run_vqe_h2(N, h_target, J, n_shots, max_iters, tol, seed, device_name="H2-1L
     p: number of HVA layers (required, ignored, when ansatz="hva"); a
     reasonable starting point is p=2-4.
 
-    submit_fn: defaults to qnexus_backend.submit_vqe_batch_job -- pass
-    local_emulator_backend.submit_vqe_batch_job instead to run against the
-    free local pytket-quantinuum/pecos backend (same call signature, same
-    computation, since H2-1LE has no physical noise model either way).
+    The ansatz is built once with free sympy Symbol parameters and handed
+    to session_cls (qnexus_backend.VqeSession by default -- pass
+    local_emulator_backend.VqeSession instead to run against the free
+    local pytket-quantinuum/pecos backend, same call signature, same
+    computation, since H2-1LE has no physical noise model either way),
+    which compiles it once; each COBYLA iteration then just substitutes
+    that iteration's numeric parameter values into the already-compiled
+    circuits (VqeSession.submit) instead of rebuilding and recompiling a
+    fresh numeric circuit from scratch every step.
     raw_stage: persistence stage name for each iteration's raw shots --
     callers running locally should pass a distinct name (e.g.
     "h2_vqe_raw_local") so local runs never overwrite a real qnexus run's
@@ -120,6 +133,8 @@ def run_vqe_h2(N, h_target, J, n_shots, max_iters, tol, seed, device_name="H2-1L
         num_params = 6 * N
         build_ansatz = lambda params: build_hea_ansatz_circuit(N, params)
 
+    symbols = [sympy.Symbol(f"p{i}") for i in range(num_params)]
+
     operator = build_tfim_pauli_operator(N, J, h_target)
     pauli_strings = list(operator._dict.keys())
     measurement_setup = measurement_reduction(pauli_strings, PauliPartitionStrat.CommutingSets)
@@ -130,23 +145,30 @@ def run_vqe_h2(N, h_target, J, n_shots, max_iters, tol, seed, device_name="H2-1L
     z_term = QubitPauliString([Qubit(0), Qubit(1)], [Pauli.Z, Pauli.Z])
     z_circuit_index = measurement_setup.results[z_term][0].circ_index
 
+    # Build the symbolic ansatz once and append each measurement-basis
+    # group to it -- this is the circuit family session_cls compiles a
+    # single time; only numeric substitution happens per iteration.
+    symbolic_ansatz = build_ansatz(symbols)
+    symbolic_circuits = []
+    for mc in measurement_setup.measurement_circs:
+        full = symbolic_ansatz.copy()
+        full.append(mc)
+        symbolic_circuits.append(full)
+
+    session = session_cls(
+        symbolic_circuits, device_name=device_name, project_name=project_name,
+        job_name=f"tfim-vqe-N{N}-h{h_target:.2f}",
+    )
+
     energy_history = []
     raw_by_iteration = {}
     best = {'energy': None, 'bitstring_lists': None}
 
     def objective(params):
-        ansatz_circuit = build_ansatz(params)
-        circuits = []
-        for mc in measurement_setup.measurement_circs:
-            full = ansatz_circuit.copy()
-            full.append(mc)
-            circuits.append(full)
+        symbol_map = dict(zip(symbols, params))
 
         iteration = len(energy_history)
-        bitstring_lists = submit_fn(
-            circuits, n_shots, device_name=device_name, project_name=project_name,
-            job_name=f"tfim-vqe-N{N}-h{h_target:.2f}-iter{iteration}",
-        )
+        bitstring_lists = session.submit(symbol_map, n_shots, iteration=iteration)
 
         # Persist the raw hardware result immediately -- before computing
         # the energy from it -- so a bug downstream never means
