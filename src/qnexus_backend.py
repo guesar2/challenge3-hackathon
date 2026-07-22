@@ -50,7 +50,7 @@ def get_project(project_name: str):
 
 def submit_quench_batch(N, h_field, J, dt, step_counts, n_shots, device_name="H2-1LE",
                          initial_state_label=None, mirror=True,
-                         project_name="ftim-hackathon", job_name=None):
+                         project_name="ftim-hackathon", job_name=None, timeout=300.0):
     """Build, upload, and run a Trotter quench circuit for every step count
     in `step_counts` (e.g. the whole 1..H2_STEPS curve for one h) in a
     single compile job and a single execute job, rather than one round trip
@@ -77,6 +77,13 @@ def submit_quench_batch(N, h_field, J, dt, step_counts, n_shots, device_name="H2
     single-circuit submission used to (bitstrings + metadata) -- callers
     should persist the whole dict as-is before postprocessing, since
     resubmitting to recover lost raw data spends quota again.
+
+    timeout: seconds qnx.execute() blocks waiting for the whole batch to
+    finish (its own default is 300s). Bigger batches -- more step_counts,
+    more shots -- take longer on Nexus; a batch that outlives this raises
+    TimeoutError from qnx.execute() itself (client-side only, the job
+    keeps running server-side), so bump this for large step-count x shots
+    sweeps (e.g. a Trotter-depth scan) rather than hitting that.
     """
     color_edges = build_chain_color_edges(N)
     project = get_project(project_name)
@@ -118,6 +125,7 @@ def submit_quench_batch(N, h_field, J, dt, step_counts, n_shots, device_name="H2
         backend_config=backend_config,
         name=job_name,
         project=project,
+        timeout=timeout,
     )
 
     bitstrings_by = {}
