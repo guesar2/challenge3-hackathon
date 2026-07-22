@@ -26,6 +26,15 @@ pytket-pecos is slow in practice and Nexus quota is currently unlimited):
   at the scan's largest useful value (default 8) so the sweep pushes gate
   count past ~50 within a single run() call (run() already returns every
   step 1..`steps` in one batch, so one call sweeps the whole depth axis).
+- run_noise_scale_comparison(): the orthogonal knob to the two scans above
+  -- instead of growing the *circuit* (more N or more steps) to make
+  hardware noise visible, this holds the circuit fixed at N=8/steps=5
+  (T=0.5, deliberately short -- run_noise_scaling()'s own N=8 point at this
+  same depth is where the ~1-8% noise band was too close to shot noise to
+  separate cleanly) and instead scales H2-Emulator's *noise model* itself
+  up via qnexus_backend.submit_quench_batch's noise_scale (UserErrorParams'
+  linear 'scale' multiplier on gate/SPAM/crosstalk/dephasing rates -- see
+  its docstring and docs.quantinuum.com/systems/user_guide/emulator_user_guide/noise_model.html).
 
 Reports BOTH absolute and relative deviations for <Z>, <X>, <Zi Zi+1> --
 not just <Z> -- since relative error blows up near <X>'s zero-crossing at
@@ -322,10 +331,74 @@ def run_depth_scaling(n=DEPTH_SCALING_N, steps=DEPTH_SCALING_STEPS, shots=DEPTH_
     return {'trotter_error': trotter, 'hardware_noise': hw_noise}
 
 
+# Short-time, amplified-noise scan. Fixed at N=8/steps=5 -- the same point
+# already covered by run_noise_scaling()'s N-sweep at config.H2_STEPS's
+# default depth (T = steps * H2_DT = 0.5, see figures/h2_noise_comparison_N8.png)
+# -- but instead of varying N or depth, this holds the circuit fixed and
+# turns up H2-Emulator's own noise model via qnexus_backend.submit_quench_batch's
+# noise_scale (UserErrorParams' 'scale' knob -- a linear multiplier on
+# H2-Emulator's default gate/SPAM/crosstalk/dephasing error rates, see
+# docs.quantinuum.com/systems/user_guide/emulator_user_guide/noise_model.html).
+# At T=0.5 the *real* (scale=1) H2-Emulator noise is comparable to shot
+# noise (see run_noise_scaling()'s N=8 finding, ~1-8% band, same order as
+# shot-noise-sized deviations) -- scaling it up is a deliberate way to make
+# the noisy-vs-noiseless gap visually obvious at this short a time, not a
+# claim about the real device's actual error rates.
+SHORT_TIME_N = DEPTH_SCALING_N  # =8, matches run_depth_scaling()'s N and the N8_S30 reference figure
+SHORT_TIME_STEPS = 5            # dt=H2_DT=0.1 -> T=0.5 ("shorter" vs. N8_S30's T=3.0)
+SHORT_TIME_SHOTS = DEPTH_SCALING_SHOTS  # =2000, same shot-noise rationale as run_depth_scaling
+SHORT_TIME_NOISE_SCALES = (3.0, 5.0)    # amplify the default (scale=1.0) H2-Emulator error rates
+
+
+def run_noise_scale_comparison(n=SHORT_TIME_N, steps=SHORT_TIME_STEPS, shots=SHORT_TIME_SHOTS,
+                                noise_scales=SHORT_TIME_NOISE_SCALES):
+    """Fixed-circuit (N/steps held constant, short T=steps*H2_DT) noise-scale
+    scan: submits the H2-1LE noiseless reference once and reuses it against
+    an H2-Emulator run per entry in `noise_scales`, producing one
+    h2_noise_comparison_N{n}_S{steps}_scale{scale}.png per scale (styled
+    like h2_noise_comparison_N8_S30.png / run_depth_scaling()'s output).
+
+    Costs against the qnexus usage quota: one noiseless batch plus one
+    noisy batch per noise_scales entry, each shots x len(H2_H_VALUES) x 2
+    bases circuits (same per-call cost as a single run() call -- see its
+    docstring).
+    """
+    print("\n" + "#" * 60)
+    print(f"# NOISE-SCALE COMPARISON: N={n}, steps=1..{steps} "
+          f"(T={steps * config.H2_DT:.2g}), scales={noise_scales}, shots={shots}")
+    print("#" * 60)
+
+    noiseless_results = run(local=False, noisy=False, n=n, steps=steps, shots=shots)
+    if noiseless_results is None:
+        print(f"Skipped (config.RUN_ON_H2_EMULATOR is False) -- "
+              "enable it in config.py to actually submit to qnexus.")
+        return None
+
+    all_summaries = {}
+    for scale in noise_scales:
+        print(f"\n--- noise_scale={scale:g} ---")
+        noisy_results = run(local=False, noisy=True, n=n, steps=steps, shots=shots, noise_scale=scale)
+
+        filename = f"h2_noise_comparison_N{n}_S{steps}_scale{scale:g}.png"
+        plot_h2_noise_comparison(
+            config.H2_H_VALUES, noiseless_results, noisy_results,
+            save_dir=config.PLOT_SAVE_DIR, n=n, filename=filename,
+        )
+
+        print(f"\nN={n}, steps=1..{steps}, noise_scale={scale:g} -- "
+              f"Hardware noise (noisy vs noiseless, same circuit):")
+        hw_noise = _compare("noisy vs noiseless", noisy_results, noiseless_results, ref_is_ed=False)
+        all_summaries[scale] = {'hardware_noise': hw_noise}
+
+    return all_summaries
+
+
 if __name__ == "__main__":
     if "--depth" in sys.argv:
         run_depth_scaling()
     elif "--async" in sys.argv:
         run_noise_scaling_async()
+    elif "--noise-scale" in sys.argv:
+        run_noise_scale_comparison()
     else:
         run_noise_scaling()

@@ -57,7 +57,7 @@ from shot_observables import (
 from vqe import run_vqe_h2
 
 
-def _stage_suffix(n, steps, local, noisy):
+def _stage_suffix(n, steps, local, noisy, noise_scale=None):
     """Shared with run_noise_scaling.run_noise_scaling_async so its
     collect phase names raw/results stages and figures identically to
     run() -- keeps both submission paths writing to the same files.
@@ -67,6 +67,8 @@ def _stage_suffix(n, steps, local, noisy):
         suffix += f"_N{n}"
     if steps != config.H2_STEPS:
         suffix += f"_S{steps}"
+    if noise_scale is not None:
+        suffix += f"_scale{noise_scale:g}"
     return suffix
 
 
@@ -130,7 +132,7 @@ def _process_h_batch(n, h, steps, batch_results):
     }
 
 
-def run(local=False, noisy=False, n=None, steps=None, shots=None, timeout=None):
+def run(local=False, noisy=False, n=None, steps=None, shots=None, timeout=None, noise_scale=None):
     """n/steps/shots: override config.H2_N/H2_STEPS/H2_SHOTS for this call
     (e.g. for a cross-N noise scan, or a fixed-N deeper-circuit scan) without
     touching config.py. Stage names and the saved figure filename include
@@ -141,6 +143,16 @@ def run(local=False, noisy=False, n=None, steps=None, shots=None, timeout=None):
     TimeoutError (qnexus_backend.submit_quench_batch's own default is 300s
     -- too short for a deep/high-shot batch, e.g. steps=30 at 2000 shots).
     Ignored when local=True (local_emulator_backend has no such wait).
+
+    noise_scale: linear multiplier on H2-Emulator's default error rates
+    (see qnexus_backend.submit_quench_batch's docstring -- 1 leaves the
+    default noise model unchanged, 0 is noiseless, values above 1 amplify
+    it beyond the device's published rates). Only has an effect when
+    noisy=True and local=False -- H2-1LE (noiseless) has no error model to
+    scale, and local_emulator_backend can't reach H2-Emulator's noise
+    model at all (see the noisy-and-local note below). Included in the
+    stage suffix (and therefore the saved figure filename) whenever set,
+    so different scales never overwrite each other's data/plots.
     """
     n = config.H2_N if n is None else n
     steps = config.H2_STEPS if steps is None else steps
@@ -166,7 +178,7 @@ def run(local=False, noisy=False, n=None, steps=None, shots=None, timeout=None):
         from local_emulator_backend import submit_quench_batch
     else:
         from qnexus_backend import submit_quench_batch
-    stage_suffix = _stage_suffix(n, steps, local, noisy)
+    stage_suffix = _stage_suffix(n, steps, local, noisy, noise_scale)
     raw_stage = f"h2_emulator_raw{stage_suffix}"
     results_stage = f"h2_emulator{stage_suffix}"
 
@@ -188,6 +200,8 @@ def run(local=False, noisy=False, n=None, steps=None, shots=None, timeout=None):
         batch_kwargs = {}
         if not local and timeout is not None:
             batch_kwargs["timeout"] = timeout
+        if not local and noisy and noise_scale is not None:
+            batch_kwargs["noise_scale"] = noise_scale
         batch_results = submit_quench_batch(
             n, h, config.J, config.H2_DT, step_counts,
             shots, device_name=device_name,
@@ -550,6 +564,9 @@ if __name__ == "__main__":
     shots_override = None
     if "--shots" in sys.argv:
         shots_override = int(sys.argv[sys.argv.index("--shots") + 1])
+    noise_scale_override = None
+    if "--noise-scale" in sys.argv:
+        noise_scale_override = float(sys.argv[sys.argv.index("--noise-scale") + 1])
     if "--phase-transition" in sys.argv:
         run_phase_transition(local=is_local, noisy=is_noisy)
     elif "--vqe" in sys.argv and "--hybrid" in sys.argv:
@@ -557,4 +574,5 @@ if __name__ == "__main__":
     elif "--vqe" in sys.argv:
         run_vqe(local=is_local, noisy=is_noisy)
     else:
-        run(local=is_local, noisy=is_noisy, n=n_override, steps=steps_override, shots=shots_override)
+        run(local=is_local, noisy=is_noisy, n=n_override, steps=steps_override, shots=shots_override,
+            noise_scale=noise_scale_override)
