@@ -38,6 +38,7 @@ Nothing in this module executes on import. It's only invoked from
 ftim_main.py when config.RUN_ON_H2_EMULATOR is explicitly set to True.
 """
 import qnexus as qnx
+from quantinuum_schemas.models.quantinuum_systems_noise import UserErrorParams
 
 from circuits import build_chain_color_edges
 from tket_circuit import build_quench_circuit, build_adiabatic_circuit
@@ -50,7 +51,8 @@ def get_project(project_name: str):
 
 def submit_quench_batch(N, h_field, J, dt, step_counts, n_shots, device_name="H2-1LE",
                          initial_state_label=None, mirror=True,
-                         project_name="ftim-hackathon", job_name=None, timeout=300.0):
+                         project_name="ftim-hackathon", job_name=None, timeout=300.0,
+                         noise_scale=None):
     """Build, upload, and run a Trotter quench circuit for every step count
     in `step_counts` (e.g. the whole 1..H2_STEPS curve for one h) in a
     single compile job and a single execute job, rather than one round trip
@@ -84,6 +86,18 @@ def submit_quench_batch(N, h_field, J, dt, step_counts, n_shots, device_name="H2
     TimeoutError from qnx.execute() itself (client-side only, the job
     keeps running server-side), so bump this for large step-count x shots
     sweeps (e.g. a Trotter-depth scan) rather than hitting that.
+
+    noise_scale: optional linear multiplier on H2-Emulator's default
+    gate/SPAM/crosstalk/dephasing error rates, passed through as
+    UserErrorParams(scale=noise_scale) on the QuantinuumConfig
+    (docs.quantinuum.com/systems/user_guide/emulator_user_guide/noise_model.html:
+    "A scaling factor can be applied that multiplies all the default or
+    supplied error parameters by the scaling rate. [...] a 1 does not
+    change the error rates while 0 makes all the errors have a probability
+    of 0."). None (default) leaves the device's own default noise model
+    untouched. Only meaningful against a noisy device (H2-Emulator) --
+    H2-1LE is exact noiseless state-vector emulation and has no error
+    model to scale.
     """
     color_edges = build_chain_color_edges(N)
     project = get_project(project_name)
@@ -106,7 +120,10 @@ def submit_quench_batch(N, h_field, J, dt, step_counts, n_shots, device_name="H2
         for (steps, basis), circ in zip(((s, b) for s in step_counts for b in bases), circuits)
     ]
 
-    backend_config = qnx.QuantinuumConfig(device_name=device_name)
+    config_kwargs = {}
+    if noise_scale is not None:
+        config_kwargs["error_params"] = UserErrorParams(scale=noise_scale)
+    backend_config = qnx.QuantinuumConfig(device_name=device_name, **config_kwargs)
     # Our circuit is built from Rx/ZZPhase; H2's native gateset doesn't
     # include a raw Rx (it wants Rz/PhasedX/ZZPhase/...), so it must be
     # rebased via a compile job before execute() will accept it. Compile
@@ -153,6 +170,7 @@ def submit_quench_batch(N, h_field, J, dt, step_counts, n_shots, device_name="H2
             "N": N, "h_field": h_field, "J": J, "dt": dt, "steps": steps,
             "n_shots": n_shots, "mirror": mirror,
             "initial_state_label": initial_state_label or ("0" * N),
+            "noise_scale": noise_scale,
         }
     return out
 
