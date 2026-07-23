@@ -131,6 +131,88 @@ def plot_ed_runtime_scaling(timings, extrapolate_to=None, save_dir=None,
     return fig
 
 
+def plot_quantum_advantage_scaling(ed_timings, circuit_costs, extrapolate_to=None,
+                                    gate_threshold=50, save_dir=None,
+                                    filename="quantum_advantage_scaling.png"):
+    """The "do we observe quantum advantage?" figure: classical ED
+    wall-clock cost vs. N (same measured+extrapolated series as
+    plot_ed_runtime_scaling) overlaid with the Trotter circuit's own cost
+    (gate count / depth vs. N, cheap to compute up to N=20 -- no
+    statevector or ED work needed, just building the circuit).
+
+    ed_timings: list of {'N', 'time_s'} dicts (measured only, no
+    extrapolated points mixed in -- extrapolation is computed here, same
+    log-linear-fit convention as plot_ed_runtime_scaling).
+    circuit_costs: list of {'N', 'depth', 'gate_count'} dicts, one Trotter
+    layer's cost at each N (does not depend on dt/h/J, only N and the
+    chain's edge coloring -- see run_n_scaling._trotter_circuit_cost).
+    gate_threshold: horizontal reference line at the hackathon brief's
+    "circuits with >~50 gates on current hardware are noise-dominated"
+    threshold (docs/hackathon.pdf, "Honest limitations").
+
+    Two side-by-side panels, not one shared axis: seconds (classical ED)
+    and gate count/depth (quantum circuit) are different units with no
+    real conversion between them, so overlaying them on one log-scale axis
+    would visually imply an equivalence ("N gates ~ N seconds") that isn't
+    real. Each panel keeps its own native unit; what's compared across
+    panels is the *shape* (exponential blowup vs. flat/linear growth) at
+    the same x=N, not the magnitudes.
+    """
+    ed_N = np.array([t['N'] for t in ed_timings])
+    ed_t = np.array([t['time_s'] for t in ed_timings])
+    circ_N = np.array([c['N'] for c in circuit_costs])
+    circ_gates = np.array([c['gate_count'] for c in circuit_costs])
+    circ_depth = np.array([c['depth'] for c in circuit_costs])
+    all_N = np.union1d(ed_N, np.arange(ed_N.min(), extrapolate_to + 1) if extrapolate_to else ed_N)
+    all_N = np.union1d(all_N, circ_N)
+
+    fig, (ax_ed, ax_circ) = plt.subplots(1, 2, figsize=(13, 5.5))
+
+    ax_ed.semilogy(ed_N, ed_t, 'o-', color='indianred', markersize=8,
+                    label='Measured')
+    if extrapolate_to and extrapolate_to > ed_N.max():
+        fit_slope, fit_intercept = np.polyfit(ed_N, np.log(ed_t), 1)
+        N_ext = np.arange(ed_N.max(), extrapolate_to + 1)
+        t_ext = np.exp(fit_intercept + fit_slope * N_ext)
+        ax_ed.semilogy(N_ext, t_ext, 'o--', color='indianred', markersize=6, alpha=0.6,
+                        label='Extrapolated (log-linear fit, NOT run)')
+    for seconds, label in ((3600, '1 hour'), (86400, '1 day')):
+        if extrapolate_to:
+            ax_ed.axhline(seconds, color='gray', linestyle=':', alpha=0.5, linewidth=1)
+            ax_ed.annotate(label, xy=(all_N.max(), seconds), xytext=(-4, 4),
+                            textcoords='offset points', fontsize=8, color='gray', ha='right')
+    ax_ed.set_xlabel('N (number of spins)')
+    ax_ed.set_ylabel('Wall-clock time (s, log scale)')
+    ax_ed.set_title('Classical: ED cost vs. N')
+    ax_ed.set_xticks(np.arange(all_N.min(), all_N.max() + 1, 2))
+    ax_ed.grid(True, which='both', alpha=0.3)
+    ax_ed.legend(fontsize=8)
+
+    ax_circ.semilogy(circ_N, circ_gates, 's-', color='steelblue', markersize=8,
+                      label='Gate count')
+    ax_circ.semilogy(circ_N, circ_depth, '^-', color='seagreen', markersize=8,
+                      label='Circuit depth')
+    if gate_threshold:
+        ax_circ.axhline(gate_threshold, color='gray', linestyle=':', alpha=0.6, linewidth=1)
+        ax_circ.annotate(f'~{gate_threshold} gates: hardware noise\nstarts to dominate '
+                          '(docs/hackathon.pdf,\n"Honest limitations")',
+                          xy=(circ_N.min(), gate_threshold), xytext=(2, 4),
+                          textcoords='offset points', fontsize=8, color='gray')
+    ax_circ.set_xlabel('N (number of spins)')
+    ax_circ.set_ylabel('Gate count / depth (log scale)')
+    ax_circ.set_title('Quantum: Trotter circuit cost vs. N')
+    ax_circ.set_xticks(np.arange(all_N.min(), all_N.max() + 1, 2))
+    ax_circ.grid(True, which='both', alpha=0.3)
+    ax_circ.legend(fontsize=8)
+
+    fig.suptitle('Why no quantum advantage yet: classical ED cost explodes '
+                  'while Trotter circuit cost stays flat/linear\n'
+                  '(separate panels -- seconds and gate count are different units, not directly comparable)')
+    fig.tight_layout()
+    _finalize(fig, filename, save_dir)
+    return fig
+
+
 # =============================================================================
 #  ADIABATIC & QUENCH PLOTS (identical in both versions)
 # =============================================================================
