@@ -42,6 +42,7 @@ from qermit.zero_noise_extrapolation.zne import Folding
 from quantinuum_schemas.models.quantinuum_systems_noise import UserErrorParams
 
 from circuits import build_chain_color_edges
+from iceberg_tfim_circuit import build_iceberg_quench_circuit
 from tket_circuit import (
     append_basis_measurement, build_adiabatic_circuit, build_quench_ansatz_circuit,
     build_quench_circuit,
@@ -545,3 +546,87 @@ class VqeSession:
             ["".join(str(bit) for bit in shot) for shot in r.get_shots()]
             for r in results
         ]
+
+
+def submit_iceberg_quench_batch(k, h_field, J, dt, step_counts, n_shots, device_name="H2-Emulator",
+                                 early_exit=True, project_name="ftim-hackathon", job_name=None,
+                                 timeout=300.0):
+    """Iceberg-encoded counterpart to submit_quench_batch: builds,
+    uploads, compiles, and runs an Iceberg-encoded TFIM quench circuit
+    (iceberg_tfim_circuit.build_iceberg_quench_circuit) for every step
+    count in `step_counts`, against a REAL noisy device by default
+    (H2-Emulator, not H2-1LE) -- the whole point of the Iceberg code is to
+    see it catch real hardware noise; a noiseless run trivially discards
+    nothing (confirmed with local_emulator_backend-style H2-1LE testing
+    during development: discard rate was exactly 0, as expected -- see
+    docs/ICEBERG_QEC_PLAN.md).
+
+    k is this circuit's logical qubit count -- reuses whatever N value the
+    caller was already using for the unencoded circuit (k must be even,
+    same constraint as every other N/H2_* value in config.py).
+
+    Costs against the qnexus usage quota -- call only with explicit
+    approval, same as submit_quench_batch. Before ever calling this,
+    confirm with a qnx.compile()-only pass (no execute, no quota cost)
+    that the circuit routes/rebases cleanly against `device_name` -- the
+    bit-list-per-register lookup below assumes compilation preserves each
+    circuit's classical registers (names, bit order) unchanged, which
+    should be checked once against a downloaded compiled circuit before
+    trusting it for a real run, not assumed.
+
+    Returns {step_count: {"data_bitstrings": [...], "flags_bitstrings":
+    [...], "n": n, "n_rounds": n_rounds}} -- zip data_bitstrings and
+    flags_bitstrings and feed the pairs into iceberg_decode.decode_shots.
+    """
+    color_edges = build_chain_color_edges(k)
+    project = get_project(project_name)
+    job_name = job_name or f"iceberg-quench-k{k}-h{h_field:.2f}"
+
+    circuits = []
+    metas = []
+    for steps in step_counts:
+        circ, meta = build_iceberg_quench_circuit(
+            k, color_edges, steps, dt, h_field, J, early_exit=early_exit
+        )
+        circuits.append(circ)
+        metas.append(meta)
+
+    circuit_refs = [
+        qnx.circuits.upload(
+            circuit=circ,
+            name=f"{job_name}-steps{steps}",
+            project=project,
+            description=(f"Iceberg-encoded TFIM quench: k={k}, h/J={h_field / J:.2f}, "
+                          f"dt={dt}, steps={steps}, early_exit={early_exit}"),
+        )
+        for steps, circ in zip(step_counts, circuits)
+    ]
+
+    backend_config = qnx.QuantinuumConfig(device_name=device_name)
+    compiled_refs = qnx.compile(
+        programs=circuit_refs,
+        backend_config=backend_config,
+        name=f"{job_name}-compile",
+        project=project,
+    )
+
+    results = qnx.execute(
+        programs=list(compiled_refs),
+        n_shots=[n_shots] * len(compiled_refs),
+        backend_config=backend_config,
+        name=job_name,
+        project=project,
+        timeout=timeout,
+    )
+
+    out = {}
+    for steps, meta, circ, result in zip(step_counts, metas, circuits, results):
+        data_bits = list(circ.get_c_register(meta["data_creg_name"]))
+        flags_bits = list(circ.get_c_register(meta["flags_creg_name"]))
+        out[steps] = {
+            "data_bitstrings": ["".join(str(bit) for bit in shot) for shot in result.get_shots(data_bits)],
+            "flags_bitstrings": ["".join(str(bit) for bit in shot) for shot in result.get_shots(flags_bits)],
+            "n": meta["n"],
+            "n_rounds": meta["n_rounds"],
+        }
+    return out

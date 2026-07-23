@@ -104,6 +104,30 @@ N_SCALING_STEPS = 20                       #Modifiqué estos valores para el esc
 N_SCALING_NOISY_DEVICE = "H2-Emulator"
 N_SCALING_NOISY_SHOTS = 200 #Modifiqué estos valores para el escalado, pero cambiar a gusto
 
+# Iceberg [[k+2,k,2]] error-detection code (iceberg_code.py,
+# iceberg_circuits.py, iceberg_tfim_circuit.py) -- fills in the QEC-encoded
+# circuit run_n_scaling.py's run_noisy_stub() docstring says is missing.
+# k plays N's role (must be even, like every other N/H2_* value above).
+# OFF by default and gated SEPARATELY from RUN_ON_H2_EMULATOR above --
+# this is a new capability, not covered by any prior approval to spend
+# quota; flip to True only with explicit approval, same convention as
+# RUN_ON_H2_EMULATOR.
+ICEBERG_RUN_ON_H2_EMULATOR = False
+ICEBERG_K = 4                       # even; small to start -- see docs/ICEBERG_QEC_PLAN.md
+ICEBERG_DEVICE_NAME = "H2-Emulator"  # noisy -- the whole point is to see it catch real
+                                     # noise; H2-1LE would trivially show a 0% discard rate
+ICEBERG_H = 1.0                      # h/J probed (critical point, matches N_SCALING_H)
+ICEBERG_DT = 0.05
+ICEBERG_STEPS = 5                   # deliberately shallow to start -- each step compiles to
+                                     # 2 syndrome-measurement rounds (see iceberg_tfim_circuit.py),
+                                     # so circuit depth/cost grows faster with steps here than
+                                     # in the unencoded pipeline; raise only after a successful
+                                     # small pilot run
+ICEBERG_SHOTS = 200
+ICEBERG_EARLY_EXIT = True           # native condition= gating skips remaining two-qubit gates
+                                     # once a shot is already flagged for discard; False -> plain
+                                     # post-selection-only circuit (useful as an A/B comparison)
+
 # Quantinuum H2 emulator run (pytket circuit submitted via qnexus).
 # OFF by default: requires a live qnexus login and costs against a metered
 # usage quota. Flip to True only with explicit approval to spend quota.
