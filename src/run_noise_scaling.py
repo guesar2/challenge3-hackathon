@@ -10,11 +10,16 @@ Two scans, both submitted to qnexus (cloud) for both H2-1LE (noiseless) and
 H2-Emulator (noisy) -- per project decision, local=False throughout (local
 pytket-pecos is slow in practice and Nexus quota is currently unlimited):
 
-- run_noise_scaling(): sweeps N in {4, 6, 8} at the default H2_STEPS=5 (see
-  plan). Result: hardware noise stayed in the same ~1-8% band across N,
-  i.e. these shallow (~20-40 two-qubit gate) circuits aren't yet deep enough
-  to show noise growing with N -- consistent with the hackathon brief's
-  claim that circuits need >~50 gates before noise dominates.
+- run_noise_scaling(): sweeps N in {4, 6, 8, 12, 16, 20, 26} at the default
+  H2_STEPS=5 -- 26 is the device's real qubit ceiling. At N<=8, hardware
+  noise stayed in the same ~1-8% band, i.e. these shallow (~20-40 two-qubit
+  gate) circuits aren't yet deep enough to show noise growing with N --
+  consistent with the hackathon brief's claim that circuits need >~50 gates
+  before noise dominates. N=12/16/20/26 push past config.H2_ED_MAX_N, where
+  run() no longer has a dense-ED reference to compare against (see its
+  docstring) -- the noisy-vs-noiseless comparison (hardware noise, Trotter
+  error cancelled) doesn't need ED and still runs at every N here; only the
+  vs-ED Trotter-error check is unavailable past N=12.
 - run_depth_scaling(): holds N fixed and instead sweeps circuit depth
   (Trotter step count) via run()'s `steps=` override, to test that
   threshold directly. Since gate count per step scales with N, N is fixed
@@ -47,8 +52,13 @@ os.chdir(_REPO_ROOT)
 # Spins to scan (fixed depth). N=4 matches the historical default
 # (config.H2_N); 6 and 8 extend it -- 8 also matches the PDF's "good
 # enough" noiseless-Trotter benchmark size, and ED stays cheap
-# (2^8 = 256 states) at all three.
-NOISE_SCALING_N_VALUES = (4, 6, 8)
+# (2^8 = 256 states) at all three. 12 is the last point with an ED
+# reference (config.H2_ED_MAX_N); 16/20/26 push past the classical wall to
+# probe hardware noise up to the device's real qubit ceiling (26) -- run()
+# skips the ED comparison there automatically, but still returns z_h2/x_h2/
+# mzz_h2 for both devices, so the noisy-vs-noiseless comparison below
+# (hardware noise, Trotter error cancelled) still works at every N here.
+NOISE_SCALING_N_VALUES = (4, 6, 8, 12, 16, 20, 26)
 
 # Depth scan: fixed N, sweep Trotter steps far enough that gate count
 # (~N two-qubit gates/step) crosses the brief's ~50-gate noise-dominated
@@ -144,8 +154,13 @@ def run_noise_scaling(n_values=NOISE_SCALING_N_VALUES):
             save_dir=config.PLOT_SAVE_DIR, n=n, filename=filename,
         )
 
-        print(f"\nN={n} -- Trotter error (noiseless vs ED):")
-        trotter = _compare("noiseless vs ED", noiseless_results, noiseless_results, ref_is_ed=True)
+        if n <= config.H2_ED_MAX_N:
+            print(f"\nN={n} -- Trotter error (noiseless vs ED):")
+            trotter = _compare("noiseless vs ED", noiseless_results, noiseless_results, ref_is_ed=True)
+        else:
+            print(f"\nN={n} -- Trotter error vs ED skipped (n > config.H2_ED_MAX_N="
+                  f"{config.H2_ED_MAX_N}, dense ED infeasible at this N)")
+            trotter = None
         print(f"\nN={n} -- Hardware noise (noisy vs noiseless, same circuit):")
         hw_noise = _compare("noisy vs noiseless", noisy_results, noiseless_results, ref_is_ed=False)
         all_summaries[n] = {'trotter_error': trotter, 'hardware_noise': hw_noise}

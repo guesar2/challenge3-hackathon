@@ -131,6 +131,16 @@ H2_STEPS = 5                 # deliberately shallow (few Trotter steps -> lower 
 H2_DT = 0.1
 H2_SHOTS = 200
 
+# Above this N, run_h2_emulator.run() skips the dense-ED reference curve --
+# same 2^N x 2^N dense-diagonalization wall as N_SCALING_ED_MAX above, just
+# named separately since it gates a different script. Needed for an N-sweep
+# that goes past the classical wall (e.g. a hardware-noise-vs-N scan up to
+# the device's real qubit count) -- run() still returns z_h2/x_h2/mzz_h2
+# either way, so a noisy-vs-noiseless comparison (same circuit on both
+# devices, no ED needed) still works past this cutoff; only the vs-ED
+# Trotter-error check and the h2_vs_ed_time plot are skipped.
+H2_ED_MAX_N = 12
+
 # H2 adiabatic sweep (phase-transition signal on hardware). Independent of
 # the quench pipeline above. Ramp length is scaled per h_target via
 # sweep_schedule.steps_for_target (same |dh/dt| ~= rate_ref logic as the

@@ -55,8 +55,6 @@ from shot_observables import (
 )
 
 from vqe import run_vqe_h2
-from local_emulator_backend import submit_vqe_batch_job as local_submit
-from qnexus_backend import submit_vqe_batch_job as nexus_submit
 
 
 def run(local=False, noisy=False, n=None, steps=None, shots=None, timeout=None):
@@ -154,33 +152,45 @@ def run(local=False, noisy=False, n=None, steps=None, shots=None, timeout=None):
             mzz_h2.append(mzz)
             mzz_err.append(mzz_se)
 
-        _, z_ed, mzz_ed, x_ed = ed_time_evolution_exact(
-            n, h, config.J, config.H2_DT, steps
-        )
+        if n <= config.H2_ED_MAX_N:
+            _, z_ed, mzz_ed, x_ed = ed_time_evolution_exact(
+                n, h, config.J, config.H2_DT, steps
+            )
 
-        max_pct_z = max(abs(a - b) / abs(b) * 100 if b != 0 else 0
-                         for a, b in zip(z_h2, z_ed))
-        max_pct_x = max(abs(a - b) / abs(b) * 100 if b != 0 else 0
-                         for a, b in zip(x_h2, x_ed))
-        max_pct_mzz = max(abs(a - b) / abs(b) * 100 if b != 0 else 0
-                           for a, b in zip(mzz_h2, mzz_ed))
-        print(f"\n  h/J={h:.2f}: max deviation <Z> = {max_pct_z:.2f}%, "
-              f"max deviation <X> = {max_pct_x:.2f}%, "
-              f"max deviation <Zi Zi+1> = {max_pct_mzz:.2f}%")
+            max_pct_z = max(abs(a - b) / abs(b) * 100 if b != 0 else 0
+                             for a, b in zip(z_h2, z_ed))
+            max_pct_x = max(abs(a - b) / abs(b) * 100 if b != 0 else 0
+                             for a, b in zip(x_h2, x_ed))
+            max_pct_mzz = max(abs(a - b) / abs(b) * 100 if b != 0 else 0
+                               for a, b in zip(mzz_h2, mzz_ed))
+            print(f"\n  h/J={h:.2f}: max deviation <Z> = {max_pct_z:.2f}%, "
+                  f"max deviation <X> = {max_pct_x:.2f}%, "
+                  f"max deviation <Zi Zi+1> = {max_pct_mzz:.2f}%")
+            z_ed, x_ed, mzz_ed = list(z_ed), list(x_ed), list(mzz_ed)
+        else:
+            # Dense ED (2^n x 2^n eigh) is infeasible this far past
+            # H2_ED_MAX_N -- skip it. z_h2/x_h2/mzz_h2 above are unaffected,
+            # so a noisy-vs-noiseless (no-ED) comparison at this n still works.
+            print(f"\n  h/J={h:.2f}: ED reference skipped (n={n} > "
+                  f"config.H2_ED_MAX_N={config.H2_ED_MAX_N})")
+            z_ed = x_ed = mzz_ed = None
 
         results[h] = {
             'times': times, 'z_h2': z_h2, 'z_err': z_err,
             'x_h2': x_h2, 'x_err': x_err,
             'mzz_h2': mzz_h2, 'mzz_err': mzz_err,
-            'z_ed': list(z_ed), 'x_ed': list(x_ed), 'mzz_ed': list(mzz_ed),
+            'z_ed': z_ed, 'x_ed': x_ed, 'mzz_ed': mzz_ed,
         }
 
     save_stage_results(results_stage, results)
 
-    plot_h2_vs_ed_time(
-        config.H2_H_VALUES, results, save_dir=config.PLOT_SAVE_DIR,
-        filename=f"h2_vs_ed_time{stage_suffix}.png",
-    )
+    if n <= config.H2_ED_MAX_N:
+        plot_h2_vs_ed_time(
+            config.H2_H_VALUES, results, save_dir=config.PLOT_SAVE_DIR,
+            filename=f"h2_vs_ed_time{stage_suffix}.png",
+        )
+    else:
+        print(f"\nSkipping h2_vs_ed_time plot (n={n} > config.H2_ED_MAX_N, no ED reference).")
 
     return results
 
@@ -445,6 +455,9 @@ def run_vqe_hybrid(noisy = False):
     print(f"H2 VQE HYBRID (local optimization -> {device_name} confirmation)")
     print("=" * 60)
 
+    from local_emulator_backend import VqeSession as LocalVqeSession
+    from qnexus_backend import VqeSession as NexusVqeSession
+
     ed_results = ed_baseline(config.H2_VQE_N, config.H2_H_VALUES, J = config.J)
 
     results = {}
@@ -454,7 +467,7 @@ def run_vqe_hybrid(noisy = False):
         local_result = run_vqe_h2(
             config.H2_VQE_N, h, config.J, config.H2_VQE_SHOTS_LOCAL,
             config.H2_VQE_MAX_ITERS_LOCAL, config.H2_VQE_TOL, config.H2_VQE_SEED,
-            submit_fn=local_submit, raw_stage="h2_vqe_raw_local",
+            session_cls=LocalVqeSession, raw_stage="h2_vqe_raw_local",
             ansatz=config.H2_VQE_ANSATZ, p=config.H2_VQE_P,
             )
 
@@ -465,7 +478,7 @@ def run_vqe_hybrid(noisy = False):
             config.H2_VQE_N, h, config.J, config.H2_VQE_SHOTS,
             1, config.H2_VQE_TOL, config.H2_VQE_SEED,
             device_name=device_name, project_name=config.H2_PROJECT_NAME,
-            submit_fn=nexus_submit, raw_stage="h2_vqe_raw_hybrid",
+            session_cls=NexusVqeSession, raw_stage="h2_vqe_raw_hybrid",
             ansatz=config.H2_VQE_ANSATZ, p=config.H2_VQE_P,
             fixed_params=local_result['final_params'],
         )
