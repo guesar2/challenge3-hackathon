@@ -131,6 +131,17 @@ H2_STEPS = 5                 # deliberately shallow (few Trotter steps -> lower 
 H2_DT = 0.1
 H2_SHOTS = 200
 
+# Default client-side wait (seconds) for a qnexus submission before
+# qnx.jobs.wait_for()/qnx.execute() raise TimeoutError -- the job itself
+# keeps running server-side; this only bounds how long the *client* blocks.
+# qnexus_backend.py's submit_quench_batch/submit_zne_batch/collect_quench_batch
+# all default to this value (still overridable per-call via their own
+# `timeout` kwarg, e.g. run_h2_emulator.run(timeout=...) / run_zne.run(timeout=...)).
+# run_noise_scaling.py's NOISE_SCALING_TIMEOUT/DEPTH_SCALING_TIMEOUT
+# deliberately override this default further (1800s) for its larger N/step
+# sweeps, which measured taking longer than the general default below.
+QNEXUS_TIMEOUT = 300.0
+
 # Above this N, run_h2_emulator.run() skips the dense-ED reference curve --
 # same 2^N x 2^N dense-diagonalization wall as N_SCALING_ED_MAX above, just
 # named separately since it gates a different script. Needed for an N-sweep

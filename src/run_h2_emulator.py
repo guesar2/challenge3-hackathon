@@ -140,9 +140,10 @@ def run(local=False, noisy=False, n=None, steps=None, shots=None, timeout=None, 
     configured runs never overwrite each other's data/plots.
 
     timeout: seconds qnx.execute() blocks per h-value before raising
-    TimeoutError (qnexus_backend.submit_quench_batch's own default is 300s
-    -- too short for a deep/high-shot batch, e.g. steps=30 at 2000 shots).
-    Ignored when local=True (local_emulator_backend has no such wait).
+    TimeoutError (qnexus_backend.submit_quench_batch's own default is
+    config.QNEXUS_TIMEOUT -- may be too short for a deep/high-shot batch,
+    e.g. steps=30 at 2000 shots). Ignored when local=True
+    (local_emulator_backend has no such wait).
 
     noise_scale: linear multiplier on H2-Emulator's default error rates
     (see qnexus_backend.submit_quench_batch's docstring -- 1 leaves the

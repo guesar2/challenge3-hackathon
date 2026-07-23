@@ -41,6 +41,7 @@ import qnexus as qnx
 from qermit.zero_noise_extrapolation.zne import Folding
 from quantinuum_schemas.models.quantinuum_systems_noise import UserErrorParams
 
+import config
 from circuits import build_chain_color_edges
 from tket_circuit import (
     append_basis_measurement, build_adiabatic_circuit, build_quench_ansatz_circuit,
@@ -150,7 +151,7 @@ def start_quench_batch(N, h_field, J, dt, step_counts, n_shots, device_name="H2-
     }
 
 
-def collect_quench_batch(pending, timeout=300.0):
+def collect_quench_batch(pending, timeout=config.QNEXUS_TIMEOUT):
     """Block until `pending` (from start_quench_batch) finishes, then
     postprocess into the same {step_count: result_dict} shape
     submit_quench_batch returns synchronously -- callers written against
@@ -203,7 +204,7 @@ def collect_quench_batch(pending, timeout=300.0):
 
 def submit_quench_batch(N, h_field, J, dt, step_counts, n_shots, device_name="H2-1LE",
                          initial_state_label=None, mirror=True,
-                         project_name="ftim-hackathon", job_name=None, timeout=300.0,
+                         project_name="ftim-hackathon", job_name=None, timeout=config.QNEXUS_TIMEOUT,
                          noise_scale=None):
     """Build, upload, and run a Trotter quench circuit for every step count
     in `step_counts` (e.g. the whole 1..H2_STEPS curve for one h) in a
@@ -233,7 +234,7 @@ def submit_quench_batch(N, h_field, J, dt, step_counts, n_shots, device_name="H2
     resubmitting to recover lost raw data spends quota again.
 
     timeout: seconds qnx.execute() blocks waiting for the whole batch to
-    finish (its own default is 300s). Bigger batches -- more step_counts,
+    finish (defaults to config.QNEXUS_TIMEOUT). Bigger batches -- more step_counts,
     more shots -- take longer on Nexus; a batch that outlives this raises
     TimeoutError from qnx.execute() itself (client-side only, the job
     keeps running server-side), so bump this for large step-count x shots
@@ -260,7 +261,7 @@ def submit_quench_batch(N, h_field, J, dt, step_counts, n_shots, device_name="H2
 
 def submit_zne_batch(N, h_field, J, dt, step_counts, fold_factors, n_shots, device_name="H2-Emulator",
                       mirror=True, initial_state_label=None, project_name="ftim-hackathon",
-                      job_name=None, timeout=300.0, noise_scale=None, bases=("z", "x")):
+                      job_name=None, timeout=config.QNEXUS_TIMEOUT, noise_scale=None, bases=("z", "x")):
     """Build, upload, and run a Trotter quench ansatz for every step count in
     `step_counts` (e.g. the whole 1..H2_STEPS curve, matching
     submit_quench_batch's step_counts convention), each folded by every
