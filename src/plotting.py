@@ -348,7 +348,10 @@ def plot_h2_noise_comparison(h_values, noiseless_data, noisy_data, save_dir=None
     run_h2_emulator.run()'s `results` (see plot_h2_vs_ed_time's docstring)
     -- both are expected to come from the same N/h/dt/steps configuration,
     so their 'z_ed'/'x_ed'/'mzz_ed' and 'times' entries coincide; ED is
-    plotted once per panel from noiseless_data.
+    plotted once per panel from noiseless_data. The ED trace is omitted
+    entirely when 'z_ed' is None (run() skips it past config.H2_ED_MAX_N,
+    where dense diagonalization is no longer feasible) -- the noisy-vs-
+    noiseless comparison this plot is really for doesn't need it.
     """
     fig, axes = plt.subplots(len(h_values), 3, figsize=(17, 4 * len(h_values)))
 
@@ -356,9 +359,11 @@ def plot_h2_noise_comparison(h_values, noiseless_data, noisy_data, save_dir=None
         r0 = noiseless_data[h]
         r1 = noisy_data[h]
         row = axes[idx] if len(h_values) > 1 else axes
+        has_ed = r0['z_ed'] is not None
 
         ax1 = row[0]
-        ax1.plot(r0['times'], r0['z_ed'], 'r-', linewidth=2, label='ED (exact)')
+        if has_ed:
+            ax1.plot(r0['times'], r0['z_ed'], 'r-', linewidth=2, label='ED (exact)')
         ax1.errorbar(r0['times'], r0['z_h2'], yerr=r0['z_err'], fmt='bo', markersize=6,
                      capsize=4, label='H2-1LE (noiseless)')
         ax1.errorbar(r1['times'], r1['z_h2'], yerr=r1['z_err'], fmt='m^', markersize=6,
@@ -370,7 +375,8 @@ def plot_h2_noise_comparison(h_values, noiseless_data, noisy_data, save_dir=None
         ax1.legend(loc='best', fontsize=8)
 
         ax2 = row[1]
-        ax2.plot(r0['times'], r0['x_ed'], 'r-', linewidth=2, label='ED (exact)')
+        if has_ed:
+            ax2.plot(r0['times'], r0['x_ed'], 'r-', linewidth=2, label='ED (exact)')
         ax2.errorbar(r0['times'], r0['x_h2'], yerr=r0['x_err'], fmt='go', markersize=6,
                      capsize=4, label='H2-1LE (noiseless)')
         ax2.errorbar(r1['times'], r1['x_h2'], yerr=r1['x_err'], fmt='m^', markersize=6,
@@ -382,7 +388,8 @@ def plot_h2_noise_comparison(h_values, noiseless_data, noisy_data, save_dir=None
         ax2.legend(loc='best', fontsize=8)
 
         ax3 = row[2]
-        ax3.plot(r0['times'], r0['mzz_ed'], 'r-', linewidth=2, label='ED (exact)')
+        if has_ed:
+            ax3.plot(r0['times'], r0['mzz_ed'], 'r-', linewidth=2, label='ED (exact)')
         ax3.errorbar(r0['times'], r0['mzz_h2'], yerr=r0['mzz_err'], fmt='bo', markersize=6,
                      capsize=4, label='H2-1LE (noiseless)')
         ax3.errorbar(r1['times'], r1['mzz_h2'], yerr=r1['mzz_err'], fmt='m^', markersize=6,
@@ -394,6 +401,56 @@ def plot_h2_noise_comparison(h_values, noiseless_data, noisy_data, save_dir=None
         ax3.legend(loc='best', fontsize=8)
 
     title = 'ED vs. noiseless (H2-1LE) vs. noisy (H2-Emulator)' + (f' -- N={n}' if n is not None else '')
+    fig.suptitle(title, fontsize=11)
+
+    _finalize(fig, filename, save_dir)
+    return fig
+
+
+def plot_zne_comparison(h_values, zne_data, save_dir=None, n=None,
+                         filename="h2_zne_comparison.png"):
+    """<Z>, <X>, and <Zi Zi+1> vs. time for the ZNE-mitigated H2 quench,
+    overlaying ED (exact), raw-noisy H2-Emulator (qermit Folding.circuit's
+    fold_factor=1, with a real bootstrap error bar), and ZNE-mitigated
+    (zne_fit.zne_extrapolate's zero-noise-limit fit, with its own
+    propagated error bar) -- same x-axis/time convention as
+    plot_h2_noise_comparison.
+
+    zne_data: dict h -> {'times', 'z_ed','z_raw','z_raw_err','z_zne',
+    'z_zne_err', 'mzz_ed','mzz_raw','mzz_raw_err','mzz_zne','mzz_zne_err',
+    and optionally 'x_ed','x_raw','x_raw_err','x_zne','x_zne_err'}, as
+    produced by run_zne.run()'s `results`. The <X> column is only drawn if
+    every h in `h_values` has x_* entries -- run_zne.run(bases=("z",))
+    (e.g. a cheap trial run covering only <Zi Zi+1>) omits them, and this
+    just drops that column rather than erroring.
+    """
+    all_columns = (
+        ('z', r'$\langle Z \rangle$ (RMS per site)'),
+        ('x', r'$\langle X \rangle$ (mean per site)'),
+        ('mzz', r'$\langle Z_i Z_{i+1} \rangle$'),
+    )
+    columns = [(key, ylabel) for key, ylabel in all_columns
+               if all(f'{key}_raw' in zne_data[h] for h in h_values)]
+
+    fig, axes = plt.subplots(len(h_values), len(columns),
+                              figsize=(6 * len(columns) + 2, 4 * len(h_values)), squeeze=False)
+
+    for row_idx, h in enumerate(h_values):
+        r = zne_data[h]
+        for col_idx, (key, ylabel) in enumerate(columns):
+            ax = axes[row_idx][col_idx]
+            ax.plot(r['times'], r[f'{key}_ed'], 'r-', linewidth=2, label='ED (exact)')
+            ax.errorbar(r['times'], r[f'{key}_raw'], yerr=r[f'{key}_raw_err'], fmt='m^', markersize=6,
+                        capsize=4, label='H2-Emulator (raw noisy)')
+            ax.errorbar(r['times'], r[f'{key}_zne'], yerr=r[f'{key}_zne_err'], fmt='go', markersize=6,
+                        capsize=4, label='ZNE-mitigated')
+            ax.set_xlabel('Time t')
+            ax.set_ylabel(ylabel)
+            ax.set_title(f'h/J = {h:.1f}' + (f', N={n}' if n is not None else ''))
+            ax.grid(True, alpha=0.3)
+            ax.legend(loc='best', fontsize=8)
+
+    title = 'ED vs. raw-noisy vs. ZNE-mitigated (H2-Emulator)' + (f' -- N={n}' if n is not None else '')
     fig.suptitle(title, fontsize=11)
 
     _finalize(fig, filename, save_dir)

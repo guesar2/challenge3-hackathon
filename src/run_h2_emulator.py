@@ -54,8 +54,85 @@ from shot_observables import (
     bitstrings_to_mx, bootstrap_mx_error,
 )
 
+from vqe import run_vqe_h2
 
-def run(local=False, noisy=False, n=None, steps=None, shots=None, timeout=None):
+
+def _stage_suffix(n, steps, local, noisy, noise_scale=None):
+    """Shared with run_noise_scaling.run_noise_scaling_async so its
+    collect phase names raw/results stages and figures identically to
+    run() -- keeps both submission paths writing to the same files.
+    """
+    suffix = "_local" if local else ("_noisy" if noisy else "")
+    if n != config.H2_N:
+        suffix += f"_N{n}"
+    if steps != config.H2_STEPS:
+        suffix += f"_S{steps}"
+    if noise_scale is not None:
+        suffix += f"_scale{noise_scale:g}"
+    return suffix
+
+
+def _process_h_batch(n, h, steps, batch_results):
+    """Turn one h's raw batch_results ({step_count: result_dict}, from
+    either submit_quench_batch or qnexus_backend.collect_quench_batch) into
+    the results[h] entry run() builds -- factored out so
+    run_noise_scaling.run_noise_scaling_async can reuse the exact same
+    observable/ED postprocessing after its own (async) collection, instead
+    of duplicating it.
+    """
+    step_counts = sorted(batch_results.keys())
+    times, z_h2, z_err, x_h2, x_err, mzz_h2, mzz_err = [], [], [], [], [], [], []
+    for step_count in step_counts:
+        job_result = batch_results[step_count]
+        z_rms, mzz = bitstrings_to_observables(job_result["bitstrings"], n)
+        z_se, mzz_se = bootstrap_observable_errors(job_result["bitstrings"], n)
+        # <X> does not vanish by symmetry the way <Z> does (the -h*X
+        # field polarizes the ground state along +X), so it's a plain
+        # signed mean over shots -- see bitstrings_to_mx -- not the
+        # RMS formula bitstrings_to_observables uses for <Z>.
+        x_mean = bitstrings_to_mx(job_result["bitstrings_x"], n)
+        x_se = bootstrap_mx_error(job_result["bitstrings_x"], n)
+
+        times.append(step_count * config.H2_DT)
+        z_h2.append(z_rms)
+        z_err.append(z_se)
+        x_h2.append(x_mean)
+        x_err.append(x_se)
+        mzz_h2.append(mzz)
+        mzz_err.append(mzz_se)
+
+    if n <= config.H2_ED_MAX_N:
+        _, z_ed, mzz_ed, x_ed = ed_time_evolution_exact(
+            n, h, config.J, config.H2_DT, steps
+        )
+
+        max_pct_z = max(abs(a - b) / abs(b) * 100 if b != 0 else 0
+                         for a, b in zip(z_h2, z_ed))
+        max_pct_x = max(abs(a - b) / abs(b) * 100 if b != 0 else 0
+                         for a, b in zip(x_h2, x_ed))
+        max_pct_mzz = max(abs(a - b) / abs(b) * 100 if b != 0 else 0
+                           for a, b in zip(mzz_h2, mzz_ed))
+        print(f"\n  h/J={h:.2f}: max deviation <Z> = {max_pct_z:.2f}%, "
+              f"max deviation <X> = {max_pct_x:.2f}%, "
+              f"max deviation <Zi Zi+1> = {max_pct_mzz:.2f}%")
+        z_ed, x_ed, mzz_ed = list(z_ed), list(x_ed), list(mzz_ed)
+    else:
+        # Dense ED (2^n x 2^n eigh) is infeasible this far past
+        # H2_ED_MAX_N -- skip it. z_h2/x_h2/mzz_h2 above are unaffected,
+        # so a noisy-vs-noiseless (no-ED) comparison at this n still works.
+        print(f"\n  h/J={h:.2f}: ED reference skipped (n={n} > "
+              f"config.H2_ED_MAX_N={config.H2_ED_MAX_N})")
+        z_ed = x_ed = mzz_ed = None
+
+    return {
+        'times': times, 'z_h2': z_h2, 'z_err': z_err,
+        'x_h2': x_h2, 'x_err': x_err,
+        'mzz_h2': mzz_h2, 'mzz_err': mzz_err,
+        'z_ed': z_ed, 'x_ed': x_ed, 'mzz_ed': mzz_ed,
+    }
+
+
+def run(local=False, noisy=False, n=None, steps=None, shots=None, timeout=None, noise_scale=None):
     """n/steps/shots: override config.H2_N/H2_STEPS/H2_SHOTS for this call
     (e.g. for a cross-N noise scan, or a fixed-N deeper-circuit scan) without
     touching config.py. Stage names and the saved figure filename include
@@ -66,6 +143,16 @@ def run(local=False, noisy=False, n=None, steps=None, shots=None, timeout=None):
     TimeoutError (qnexus_backend.submit_quench_batch's own default is 300s
     -- too short for a deep/high-shot batch, e.g. steps=30 at 2000 shots).
     Ignored when local=True (local_emulator_backend has no such wait).
+
+    noise_scale: linear multiplier on H2-Emulator's default error rates
+    (see qnexus_backend.submit_quench_batch's docstring -- 1 leaves the
+    default noise model unchanged, 0 is noiseless, values above 1 amplify
+    it beyond the device's published rates). Only has an effect when
+    noisy=True and local=False -- H2-1LE (noiseless) has no error model to
+    scale, and local_emulator_backend can't reach H2-Emulator's noise
+    model at all (see the noisy-and-local note below). Included in the
+    stage suffix (and therefore the saved figure filename) whenever set,
+    so different scales never overwrite each other's data/plots.
     """
     n = config.H2_N if n is None else n
     steps = config.H2_STEPS if steps is None else steps
@@ -91,11 +178,7 @@ def run(local=False, noisy=False, n=None, steps=None, shots=None, timeout=None):
         from local_emulator_backend import submit_quench_batch
     else:
         from qnexus_backend import submit_quench_batch
-    stage_suffix = "_local" if local else ("_noisy" if noisy else "")
-    if n != config.H2_N:
-        stage_suffix += f"_N{n}"
-    if steps != config.H2_STEPS:
-        stage_suffix += f"_S{steps}"
+    stage_suffix = _stage_suffix(n, steps, local, noisy, noise_scale)
     raw_stage = f"h2_emulator_raw{stage_suffix}"
     results_stage = f"h2_emulator{stage_suffix}"
 
@@ -117,6 +200,8 @@ def run(local=False, noisy=False, n=None, steps=None, shots=None, timeout=None):
         batch_kwargs = {}
         if not local and timeout is not None:
             batch_kwargs["timeout"] = timeout
+        if not local and noisy and noise_scale is not None:
+            batch_kwargs["noise_scale"] = noise_scale
         batch_results = submit_quench_batch(
             n, h, config.J, config.H2_DT, step_counts,
             shots, device_name=device_name,
@@ -130,53 +215,17 @@ def run(local=False, noisy=False, n=None, steps=None, shots=None, timeout=None):
         raw_by_h[h] = batch_results
         save_stage_results(raw_stage, raw_by_h)
 
-        times, z_h2, z_err, x_h2, x_err, mzz_h2, mzz_err = [], [], [], [], [], [], []
-        for step_count in step_counts:
-            job_result = batch_results[step_count]
-            z_rms, mzz = bitstrings_to_observables(job_result["bitstrings"], n)
-            z_se, mzz_se = bootstrap_observable_errors(job_result["bitstrings"], n)
-            # <X> does not vanish by symmetry the way <Z> does (the -h*X
-            # field polarizes the ground state along +X), so it's a plain
-            # signed mean over shots -- see bitstrings_to_mx -- not the
-            # RMS formula bitstrings_to_observables uses for <Z>.
-            x_mean = bitstrings_to_mx(job_result["bitstrings_x"], n)
-            x_se = bootstrap_mx_error(job_result["bitstrings_x"], n)
-
-            times.append(step_count * config.H2_DT)
-            z_h2.append(z_rms)
-            z_err.append(z_se)
-            x_h2.append(x_mean)
-            x_err.append(x_se)
-            mzz_h2.append(mzz)
-            mzz_err.append(mzz_se)
-
-        _, z_ed, mzz_ed, x_ed = ed_time_evolution_exact(
-            n, h, config.J, config.H2_DT, steps
-        )
-
-        max_pct_z = max(abs(a - b) / abs(b) * 100 if b != 0 else 0
-                         for a, b in zip(z_h2, z_ed))
-        max_pct_x = max(abs(a - b) / abs(b) * 100 if b != 0 else 0
-                         for a, b in zip(x_h2, x_ed))
-        max_pct_mzz = max(abs(a - b) / abs(b) * 100 if b != 0 else 0
-                           for a, b in zip(mzz_h2, mzz_ed))
-        print(f"\n  h/J={h:.2f}: max deviation <Z> = {max_pct_z:.2f}%, "
-              f"max deviation <X> = {max_pct_x:.2f}%, "
-              f"max deviation <Zi Zi+1> = {max_pct_mzz:.2f}%")
-
-        results[h] = {
-            'times': times, 'z_h2': z_h2, 'z_err': z_err,
-            'x_h2': x_h2, 'x_err': x_err,
-            'mzz_h2': mzz_h2, 'mzz_err': mzz_err,
-            'z_ed': list(z_ed), 'x_ed': list(x_ed), 'mzz_ed': list(mzz_ed),
-        }
+        results[h] = _process_h_batch(n, h, steps, batch_results)
 
     save_stage_results(results_stage, results)
 
-    plot_h2_vs_ed_time(
-        config.H2_H_VALUES, results, save_dir=config.PLOT_SAVE_DIR,
-        filename=f"h2_vs_ed_time{stage_suffix}.png",
-    )
+    if n <= config.H2_ED_MAX_N:
+        plot_h2_vs_ed_time(
+            config.H2_H_VALUES, results, save_dir=config.PLOT_SAVE_DIR,
+            filename=f"h2_vs_ed_time{stage_suffix}.png",
+        )
+    else:
+        print(f"\nSkipping h2_vs_ed_time plot (n={n} > config.H2_ED_MAX_N, no ED reference).")
 
     return results
 
@@ -428,6 +477,61 @@ def run_vqe(local=False, noisy=False):
     return results
 
 
+
+def run_vqe_hybrid(noisy = False):
+    """Hybrid VQE: converge locally for free, the confirm with one real submission to Nexus at the best parameters found."""
+
+    if not config.RUN_ON_H2_EMULATOR:
+        print("Skipped confirmation step (config.RUN_ON_H2_EMULATOR = False). Enable it first.")
+        return None 
+
+    device_name = config.H2_DEVICE_NAME_NOISY if noisy else config.H2_DEVICE_NAME
+    print("="*60)
+    print(f"H2 VQE HYBRID (local optimization -> {device_name} confirmation)")
+    print("=" * 60)
+
+    from local_emulator_backend import VqeSession as LocalVqeSession
+    from qnexus_backend import VqeSession as NexusVqeSession
+
+    ed_results = ed_baseline(config.H2_VQE_N, config.H2_H_VALUES, J = config.J)
+
+    results = {}
+    for h in config.H2_H_VALUES:
+        print(f"\n[1/2] Converging locally: N={config.H2_VQE_N}, h/J={h:.2f}, "
+              f"max_iters={config.H2_VQE_MAX_ITERS_LOCAL} (free, local)...")
+        local_result = run_vqe_h2(
+            config.H2_VQE_N, h, config.J, config.H2_VQE_SHOTS_LOCAL,
+            config.H2_VQE_MAX_ITERS_LOCAL, config.H2_VQE_TOL, config.H2_VQE_SEED,
+            session_cls=LocalVqeSession, raw_stage="h2_vqe_raw_local",
+            ansatz=config.H2_VQE_ANSATZ, p=config.H2_VQE_P,
+            )
+
+        print(f"      Local best energy = {local_result['final_energy']:.4f}")
+
+        print(f"[2/2] Confirming on {device_name} (real, ONE submission)...")
+        confirm_result = run_vqe_h2(
+            config.H2_VQE_N, h, config.J, config.H2_VQE_SHOTS,
+            1, config.H2_VQE_TOL, config.H2_VQE_SEED,
+            device_name=device_name, project_name=config.H2_PROJECT_NAME,
+            session_cls=NexusVqeSession, raw_stage="h2_vqe_raw_hybrid",
+            ansatz=config.H2_VQE_ANSATZ, p=config.H2_VQE_P,
+            fixed_params=local_result['final_params'],
+        )
+
+        ed_energy = next(r['energy'] for r in ed_results if r['h'] == h)* config.H2_VQE_N
+        pct_energy = abs(confirm_result['final_energy'] - ed_energy) / abs(ed_energy) * 100 if ed_energy != 0 else 0
+        print(f"      Confirmed energy = {confirm_result['final_energy']:.4f}  "
+              f"(ED = {ed_energy:.4f}, {pct_energy:.2f}% diff)")
+
+        results[h] = confirm_result
+
+    save_stage_results("h2_vqe_hybrid", results)
+    return results
+
+
+
+
+
 def load_last_run(local=False, noisy=False):
     """Convenience accessor for the most recent saved H2 results (raw shots
     and processed observables), without spending any quota. Pass
@@ -460,9 +564,15 @@ if __name__ == "__main__":
     shots_override = None
     if "--shots" in sys.argv:
         shots_override = int(sys.argv[sys.argv.index("--shots") + 1])
+    noise_scale_override = None
+    if "--noise-scale" in sys.argv:
+        noise_scale_override = float(sys.argv[sys.argv.index("--noise-scale") + 1])
     if "--phase-transition" in sys.argv:
         run_phase_transition(local=is_local, noisy=is_noisy)
+    elif "--vqe" in sys.argv and "--hybrid" in sys.argv:
+        run_vqe_hybrid(noisy=is_noisy)
     elif "--vqe" in sys.argv:
         run_vqe(local=is_local, noisy=is_noisy)
     else:
-        run(local=is_local, noisy=is_noisy, n=n_override, steps=steps_override, shots=shots_override)
+        run(local=is_local, noisy=is_noisy, n=n_override, steps=steps_override, shots=shots_override,
+            noise_scale=noise_scale_override)

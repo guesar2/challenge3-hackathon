@@ -38,9 +38,14 @@ Nothing in this module executes on import. It's only invoked from
 ftim_main.py when config.RUN_ON_H2_EMULATOR is explicitly set to True.
 """
 import qnexus as qnx
+from qermit.zero_noise_extrapolation.zne import Folding
+from quantinuum_schemas.models.quantinuum_systems_noise import UserErrorParams
 
 from circuits import build_chain_color_edges
-from tket_circuit import build_quench_circuit, build_adiabatic_circuit
+from tket_circuit import (
+    append_basis_measurement, build_adiabatic_circuit, build_quench_ansatz_circuit,
+    build_quench_circuit,
+)
 
 
 def get_project(project_name: str):
@@ -48,9 +53,158 @@ def get_project(project_name: str):
     return qnx.projects.get_or_create(name=project_name)
 
 
+def start_quench_batch(N, h_field, J, dt, step_counts, n_shots, device_name="H2-1LE",
+                        initial_state_label=None, mirror=True,
+                        project_name="ftim-hackathon", job_name=None, noise_scale=None):
+    """Build, upload, compile, and SUBMIT (non-blocking) a Trotter quench
+    circuit for every step count in `step_counts` -- the async counterpart
+    to submit_quench_batch. Returns immediately via qnx.start_execute_job
+    (rather than qnx.execute, which blocks until results are in), so many
+    (N, h, device) batches can be started back-to-back and queue
+    concurrently on Nexus instead of one full batch's queue-wait at a time.
+    Pair with collect_quench_batch to fetch each one's results afterward --
+    total wall time then tracks the slowest single job's queue-wait, not
+    the sum of every job's queue-wait, since Nexus doesn't serialize
+    unrelated jobs against each other.
+
+    Compile still blocks (qnx.compile(), not an async variant) -- it's a
+    classical tket pass on Nexus, not hardware-queued, so it's fast next to
+    execute's device queue-wait and not worth decoupling too.
+
+    noise_scale: optional linear multiplier on H2-Emulator's default
+    gate/SPAM/crosstalk/dephasing error rates, passed through as
+    UserErrorParams(scale=noise_scale) on the QuantinuumConfig
+    (docs.quantinuum.com/systems/user_guide/emulator_user_guide/noise_model.html:
+    "A scaling factor can be applied that multiplies all the default or
+    supplied error parameters by the scaling rate. [...] a 1 does not
+    change the error rates while 0 makes all the errors have a probability
+    of 0."). None (default) leaves the device's own default noise model
+    untouched. Only meaningful against a noisy device (H2-Emulator) --
+    H2-1LE is exact noiseless state-vector emulation and has no error
+    model to scale.
+
+    Costs against the qnexus usage quota once collect_quench_batch fetches
+    results -- call only with explicit approval, same as submit_quench_batch.
+
+    Returns an opaque dict that collect_quench_batch consumes; don't rely
+    on its shape beyond passing it straight through.
+    """
+    color_edges = build_chain_color_edges(N)
+    project = get_project(project_name)
+    job_name = job_name or f"tfim-quench-N{N}-h{h_field:.2f}"
+
+    bases = ("z", "x")
+    circuits = [
+        build_quench_circuit(N, color_edges, steps, dt, h_field, J, mirror=mirror,
+                              initial_state_label=initial_state_label, basis=basis)
+        for steps in step_counts for basis in bases
+    ]
+    circuit_refs = [
+        qnx.circuits.upload(
+            circuit=circ,
+            name=f"{job_name}-steps{steps}-{basis}",
+            project=project,
+            description=(f"TFIM Trotter quench: N={N}, h/J={h_field / J:.2f}, "
+                          f"dt={dt}, steps={steps}, mirror={mirror}, basis={basis}"),
+        )
+        for (steps, basis), circ in zip(((s, b) for s in step_counts for b in bases), circuits)
+    ]
+
+    config_kwargs = {}
+    if noise_scale is not None:
+        config_kwargs["error_params"] = UserErrorParams(scale=noise_scale)
+    backend_config = qnx.QuantinuumConfig(device_name=device_name, **config_kwargs)
+    # Our circuit is built from Rx/ZZPhase; H2's native gateset doesn't
+    # include a raw Rx (it wants Rz/PhasedX/ZZPhase/...), so it must be
+    # rebased via a compile job before execute() will accept it. Compile
+    # jobs are classical (tket passes run on Nexus, not the QPU/emulator)
+    # and don't cost hardware quota, unlike execute().
+    compiled_refs = qnx.compile(
+        programs=circuit_refs,
+        backend_config=backend_config,
+        name=f"{job_name}-compile",
+        project=project,
+    )
+
+    execute_job_ref = qnx.start_execute_job(
+        programs=list(compiled_refs),
+        n_shots=[n_shots] * len(compiled_refs),
+        backend_config=backend_config,
+        name=job_name,
+        project=project,
+    )
+
+    return {
+        "execute_job_ref": execute_job_ref,
+        "step_counts": step_counts,
+        "bases": bases,
+        "circuit_refs": circuit_refs,
+        "compiled_refs": compiled_refs,
+        "job_name": job_name,
+        "project_name": project_name,
+        "device_name": device_name,
+        "N": N, "h_field": h_field, "J": J, "dt": dt,
+        "n_shots": n_shots, "mirror": mirror,
+        "initial_state_label": initial_state_label,
+        "noise_scale": noise_scale,
+    }
+
+
+def collect_quench_batch(pending, timeout=300.0):
+    """Block until `pending` (from start_quench_batch) finishes, then
+    postprocess into the same {step_count: result_dict} shape
+    submit_quench_batch returns synchronously -- callers written against
+    submit_quench_batch's return shape don't need to change.
+
+    timeout: seconds to wait for this specific job (see submit_quench_batch's
+    docstring for the same timeout-vs-batch-size tradeoff -- unaffected by
+    how many *other* jobs are also pending, since each is tracked and waited
+    on independently).
+    """
+    qnx.jobs.wait_for(pending["execute_job_ref"], timeout=timeout)
+    result_refs = qnx.jobs.results(pending["execute_job_ref"])
+
+    step_counts = pending["step_counts"]
+    bases = pending["bases"]
+    circuit_refs = pending["circuit_refs"]
+    compiled_refs = pending["compiled_refs"]
+
+    bitstrings_by = {}
+    refs_by = {}
+    for (steps, basis), circuit_ref, compiled_ref, result_ref in zip(
+        ((s, b) for s in step_counts for b in bases), circuit_refs, compiled_refs, result_refs
+    ):
+        result = result_ref.download_result()
+        bitstrings_by[(steps, basis)] = ["".join(str(bit) for bit in shot) for shot in result.get_shots()]
+        refs_by[(steps, basis)] = (circuit_ref, compiled_ref)
+
+    out = {}
+    for steps in step_counts:
+        circuit_ref, compiled_ref = refs_by[(steps, "z")]
+        circuit_ref_x, compiled_ref_x = refs_by[(steps, "x")]
+        out[steps] = {
+            "bitstrings": bitstrings_by[(steps, "z")],
+            "bitstrings_x": bitstrings_by[(steps, "x")],
+            "circuit_ref_id": str(circuit_ref.id),
+            "compiled_circuit_ref_id": str(compiled_ref.id),
+            "circuit_ref_id_x": str(circuit_ref_x.id),
+            "compiled_circuit_ref_id_x": str(compiled_ref_x.id),
+            "job_name": pending["job_name"],
+            "project_name": pending["project_name"],
+            "device_name": pending["device_name"],
+            "N": pending["N"], "h_field": pending["h_field"], "J": pending["J"],
+            "dt": pending["dt"], "steps": steps,
+            "n_shots": pending["n_shots"], "mirror": pending["mirror"],
+            "initial_state_label": pending["initial_state_label"] or ("0" * pending["N"]),
+            "noise_scale": pending["noise_scale"],
+        }
+    return out
+
+
 def submit_quench_batch(N, h_field, J, dt, step_counts, n_shots, device_name="H2-1LE",
                          initial_state_label=None, mirror=True,
-                         project_name="ftim-hackathon", job_name=None, timeout=300.0):
+                         project_name="ftim-hackathon", job_name=None, timeout=300.0,
+                         noise_scale=None):
     """Build, upload, and run a Trotter quench circuit for every step count
     in `step_counts` (e.g. the whole 1..H2_STEPS curve for one h) in a
     single compile job and a single execute job, rather than one round trip
@@ -84,76 +238,122 @@ def submit_quench_batch(N, h_field, J, dt, step_counts, n_shots, device_name="H2
     TimeoutError from qnx.execute() itself (client-side only, the job
     keeps running server-side), so bump this for large step-count x shots
     sweeps (e.g. a Trotter-depth scan) rather than hitting that.
+
+    noise_scale: optional linear multiplier on H2-Emulator's default
+    gate/SPAM/crosstalk/dephasing error rates -- see start_quench_batch's
+    docstring for the full explanation; passed straight through.
+
+    Implemented as start_quench_batch immediately followed by
+    collect_quench_batch -- i.e. still one full submit-then-wait per call.
+    Callers that want many batches queued concurrently on Nexus (e.g. a
+    multi-N sweep) should call start_quench_batch for all of them up front
+    and collect_quench_batch each one afterward instead -- see
+    run_noise_scaling.run_noise_scaling_async.
+    """
+    pending = start_quench_batch(
+        N, h_field, J, dt, step_counts, n_shots, device_name=device_name,
+        initial_state_label=initial_state_label, mirror=mirror,
+        project_name=project_name, job_name=job_name, noise_scale=noise_scale,
+    )
+    return collect_quench_batch(pending, timeout=timeout)
+
+
+def submit_zne_batch(N, h_field, J, dt, step_counts, fold_factors, n_shots, device_name="H2-Emulator",
+                      mirror=True, initial_state_label=None, project_name="ftim-hackathon",
+                      job_name=None, timeout=300.0, noise_scale=None, bases=("z", "x")):
+    """Build, upload, and run a Trotter quench ansatz for every step count in
+    `step_counts` (e.g. the whole 1..H2_STEPS curve, matching
+    submit_quench_batch's step_counts convention), each folded by every
+    factor in `fold_factors` (qermit's Folding.circuit -- e.g. (1, 3, 5),
+    ODD integers only -- see Folding.circuit's own ValueError otherwise) and
+    measured in every basis in `bases`, all as a single compile/execute
+    batch -- same batching rationale as submit_quench_batch, just with two
+    extra axes (fold factor, and optionally a restricted basis set) folded
+    into the one round trip.
+
+    fold_factors: noise-scaling multipliers for Folding.circuit. Folding.circuit
+    with noise_scaling=1 performs zero fold iterations and returns the plain
+    unfolded circuit unchanged (verified directly) -- so fold_factors=1 IS the
+    raw-noisy baseline circuit, not a separate submission.
+
+    bases: which measurement bases to include -- defaults to both Z and X
+    (needed for <Z>/<Zi Zi+1> and <X> respectively). Pass ("z",) alone when
+    only Z-basis observables are needed (e.g. testing with <Zi Zi+1> only),
+    to roughly halve the circuit count of a trial run before committing to
+    the full sweep.
+
+    Folded circuits are still built from the same native Rx/ZZPhase gate types
+    as every other circuit this module submits (Folding.circuit inverts gates
+    via their own .dagger, it doesn't introduce new gate types), so they
+    compile to H2's native gateset the same way via qnx.compile() below -- no
+    local rebase pass is needed here, unlike a design that folds circuits
+    outside of a submission batch.
+
+    noise_scale: optional linear multiplier on H2-Emulator's default error
+    rates (UserErrorParams(scale=...), same meaning as submit_quench_batch's
+    noise_scale) -- independent of fold_factors: this scales the *device's*
+    noise model, fold_factors scales noise via *circuit* folding. Two
+    different knobs, kept distinctly named on purpose.
+
+    Returns {step_count: {fold_factor: {"bitstrings": [...], "bitstrings_x": [...] (if
+    requested)}}}, matching submit_quench_batch's per-step_count shape (one
+    level up) so callers can reuse shot_observables.py's
+    bitstrings_to_observables/bitstrings_to_mx/bootstrap_* functions
+    unchanged at each (step_count, fold_factor) point.
     """
     color_edges = build_chain_color_edges(N)
     project = get_project(project_name)
-    job_name = job_name or f"tfim-quench-N{N}-h{h_field:.2f}"
+    job_name = job_name or f"tfim-zne-N{N}-h{h_field:.2f}"
 
-    bases = ("z", "x")
-    circuits = [
-        build_quench_circuit(N, color_edges, steps, dt, h_field, J, mirror=mirror,
-                              initial_state_label=initial_state_label, basis=basis)
-        for steps in step_counts for basis in bases
-    ]
+    jobs = [(steps, fold, basis) for steps in step_counts for fold in fold_factors for basis in bases]
+    circuits = []
+    for steps, fold, basis in jobs:
+        ansatz = build_quench_ansatz_circuit(N, color_edges, steps, dt, h_field, J, mirror=mirror,
+                                              initial_state_label=initial_state_label)
+        folded = Folding.circuit(ansatz, fold)[0]
+        append_basis_measurement(folded, N, basis)
+        circuits.append(folded)
+
     circuit_refs = [
         qnx.circuits.upload(
-            circuit=circ,
-            name=f"{job_name}-steps{steps}-{basis}",
-            project=project,
-            description=(f"TFIM Trotter quench: N={N}, h/J={h_field / J:.2f}, "
-                          f"dt={dt}, steps={steps}, mirror={mirror}, basis={basis}"),
+            circuit=circ, name=f"{job_name}-steps{steps}-fold{fold}-{basis}", project=project,
+            description=(f"ZNE-folded TFIM quench: N={N}, h/J={h_field / J:.2f}, "
+                          f"dt={dt}, steps={steps}, fold={fold}, basis={basis}"),
         )
-        for (steps, basis), circ in zip(((s, b) for s in step_counts for b in bases), circuits)
+        for (steps, fold, basis), circ in zip(jobs, circuits)
     ]
 
-    backend_config = qnx.QuantinuumConfig(device_name=device_name)
-    # Our circuit is built from Rx/ZZPhase; H2's native gateset doesn't
-    # include a raw Rx (it wants Rz/PhasedX/ZZPhase/...), so it must be
-    # rebased via a compile job before execute() will accept it. Compile
-    # jobs are classical (tket passes run on Nexus, not the QPU/emulator)
-    # and don't cost hardware quota, unlike execute().
+    config_kwargs = {}
+    if noise_scale is not None:
+        config_kwargs["error_params"] = UserErrorParams(scale=noise_scale)
+    backend_config = qnx.QuantinuumConfig(device_name=device_name, **config_kwargs)
+
     compiled_refs = qnx.compile(
-        programs=circuit_refs,
-        backend_config=backend_config,
-        name=f"{job_name}-compile",
-        project=project,
+        programs=circuit_refs, backend_config=backend_config,
+        name=f"{job_name}-compile", project=project,
     )
 
     results = qnx.execute(
-        programs=list(compiled_refs),
-        n_shots=[n_shots] * len(compiled_refs),
-        backend_config=backend_config,
-        name=job_name,
-        project=project,
-        timeout=timeout,
+        programs=list(compiled_refs), n_shots=[n_shots] * len(compiled_refs),
+        backend_config=backend_config, name=job_name, project=project, timeout=timeout,
     )
 
     bitstrings_by = {}
-    refs_by = {}
-    for (steps, basis), circuit_ref, compiled_ref, result in zip(
-        ((s, b) for s in step_counts for b in bases), circuit_refs, compiled_refs, results
-    ):
-        bitstrings_by[(steps, basis)] = ["".join(str(bit) for bit in shot) for shot in result.get_shots()]
-        refs_by[(steps, basis)] = (circuit_ref, compiled_ref)
+    for (steps, fold, basis), result in zip(jobs, results):
+        bitstrings_by[(steps, fold, basis)] = [
+            "".join(str(bit) for bit in shot) for shot in result.get_shots()
+        ]
 
     out = {}
     for steps in step_counts:
-        circuit_ref, compiled_ref = refs_by[(steps, "z")]
-        circuit_ref_x, compiled_ref_x = refs_by[(steps, "x")]
-        out[steps] = {
-            "bitstrings": bitstrings_by[(steps, "z")],
-            "bitstrings_x": bitstrings_by[(steps, "x")],
-            "circuit_ref_id": str(circuit_ref.id),
-            "compiled_circuit_ref_id": str(compiled_ref.id),
-            "circuit_ref_id_x": str(circuit_ref_x.id),
-            "compiled_circuit_ref_id_x": str(compiled_ref_x.id),
-            "job_name": job_name,
-            "project_name": project_name,
-            "device_name": device_name,
-            "N": N, "h_field": h_field, "J": J, "dt": dt, "steps": steps,
-            "n_shots": n_shots, "mirror": mirror,
-            "initial_state_label": initial_state_label or ("0" * N),
-        }
+        out[steps] = {}
+        for fold in fold_factors:
+            entry = {}
+            if "z" in bases:
+                entry["bitstrings"] = bitstrings_by[(steps, fold, "z")]
+            if "x" in bases:
+                entry["bitstrings_x"] = bitstrings_by[(steps, fold, "x")]
+            out[steps][fold] = entry
     return out
 
 
