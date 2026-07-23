@@ -348,7 +348,10 @@ def plot_h2_noise_comparison(h_values, noiseless_data, noisy_data, save_dir=None
     run_h2_emulator.run()'s `results` (see plot_h2_vs_ed_time's docstring)
     -- both are expected to come from the same N/h/dt/steps configuration,
     so their 'z_ed'/'x_ed'/'mzz_ed' and 'times' entries coincide; ED is
-    plotted once per panel from noiseless_data.
+    plotted once per panel from noiseless_data. The ED trace is omitted
+    entirely when 'z_ed' is None (run() skips it past config.H2_ED_MAX_N,
+    where dense diagonalization is no longer feasible) -- the noisy-vs-
+    noiseless comparison this plot is really for doesn't need it.
     """
     fig, axes = plt.subplots(len(h_values), 3, figsize=(17, 4 * len(h_values)))
 
@@ -356,9 +359,11 @@ def plot_h2_noise_comparison(h_values, noiseless_data, noisy_data, save_dir=None
         r0 = noiseless_data[h]
         r1 = noisy_data[h]
         row = axes[idx] if len(h_values) > 1 else axes
+        has_ed = r0['z_ed'] is not None
 
         ax1 = row[0]
-        ax1.plot(r0['times'], r0['z_ed'], 'r-', linewidth=2, label='ED (exact)')
+        if has_ed:
+            ax1.plot(r0['times'], r0['z_ed'], 'r-', linewidth=2, label='ED (exact)')
         ax1.errorbar(r0['times'], r0['z_h2'], yerr=r0['z_err'], fmt='bo', markersize=6,
                      capsize=4, label='H2-1LE (noiseless)')
         ax1.errorbar(r1['times'], r1['z_h2'], yerr=r1['z_err'], fmt='m^', markersize=6,
@@ -370,7 +375,8 @@ def plot_h2_noise_comparison(h_values, noiseless_data, noisy_data, save_dir=None
         ax1.legend(loc='best', fontsize=8)
 
         ax2 = row[1]
-        ax2.plot(r0['times'], r0['x_ed'], 'r-', linewidth=2, label='ED (exact)')
+        if has_ed:
+            ax2.plot(r0['times'], r0['x_ed'], 'r-', linewidth=2, label='ED (exact)')
         ax2.errorbar(r0['times'], r0['x_h2'], yerr=r0['x_err'], fmt='go', markersize=6,
                      capsize=4, label='H2-1LE (noiseless)')
         ax2.errorbar(r1['times'], r1['x_h2'], yerr=r1['x_err'], fmt='m^', markersize=6,
@@ -382,7 +388,8 @@ def plot_h2_noise_comparison(h_values, noiseless_data, noisy_data, save_dir=None
         ax2.legend(loc='best', fontsize=8)
 
         ax3 = row[2]
-        ax3.plot(r0['times'], r0['mzz_ed'], 'r-', linewidth=2, label='ED (exact)')
+        if has_ed:
+            ax3.plot(r0['times'], r0['mzz_ed'], 'r-', linewidth=2, label='ED (exact)')
         ax3.errorbar(r0['times'], r0['mzz_h2'], yerr=r0['mzz_err'], fmt='bo', markersize=6,
                      capsize=4, label='H2-1LE (noiseless)')
         ax3.errorbar(r1['times'], r1['mzz_h2'], yerr=r1['mzz_err'], fmt='m^', markersize=6,

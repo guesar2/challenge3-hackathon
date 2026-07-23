@@ -56,7 +56,80 @@ from shot_observables import (
 
 from vqe import run_vqe_h2
 
-from vqe import run_vqe_h2
+
+def _stage_suffix(n, steps, local, noisy, noise_scale=None):
+    """Shared with run_noise_scaling.run_noise_scaling_async so its
+    collect phase names raw/results stages and figures identically to
+    run() -- keeps both submission paths writing to the same files.
+    """
+    suffix = "_local" if local else ("_noisy" if noisy else "")
+    if n != config.H2_N:
+        suffix += f"_N{n}"
+    if steps != config.H2_STEPS:
+        suffix += f"_S{steps}"
+    if noise_scale is not None:
+        suffix += f"_scale{noise_scale:g}"
+    return suffix
+
+
+def _process_h_batch(n, h, steps, batch_results):
+    """Turn one h's raw batch_results ({step_count: result_dict}, from
+    either submit_quench_batch or qnexus_backend.collect_quench_batch) into
+    the results[h] entry run() builds -- factored out so
+    run_noise_scaling.run_noise_scaling_async can reuse the exact same
+    observable/ED postprocessing after its own (async) collection, instead
+    of duplicating it.
+    """
+    step_counts = sorted(batch_results.keys())
+    times, z_h2, z_err, x_h2, x_err, mzz_h2, mzz_err = [], [], [], [], [], [], []
+    for step_count in step_counts:
+        job_result = batch_results[step_count]
+        z_rms, mzz = bitstrings_to_observables(job_result["bitstrings"], n)
+        z_se, mzz_se = bootstrap_observable_errors(job_result["bitstrings"], n)
+        # <X> does not vanish by symmetry the way <Z> does (the -h*X
+        # field polarizes the ground state along +X), so it's a plain
+        # signed mean over shots -- see bitstrings_to_mx -- not the
+        # RMS formula bitstrings_to_observables uses for <Z>.
+        x_mean = bitstrings_to_mx(job_result["bitstrings_x"], n)
+        x_se = bootstrap_mx_error(job_result["bitstrings_x"], n)
+
+        times.append(step_count * config.H2_DT)
+        z_h2.append(z_rms)
+        z_err.append(z_se)
+        x_h2.append(x_mean)
+        x_err.append(x_se)
+        mzz_h2.append(mzz)
+        mzz_err.append(mzz_se)
+
+    if n <= config.H2_ED_MAX_N:
+        _, z_ed, mzz_ed, x_ed = ed_time_evolution_exact(
+            n, h, config.J, config.H2_DT, steps
+        )
+
+        max_pct_z = max(abs(a - b) / abs(b) * 100 if b != 0 else 0
+                         for a, b in zip(z_h2, z_ed))
+        max_pct_x = max(abs(a - b) / abs(b) * 100 if b != 0 else 0
+                         for a, b in zip(x_h2, x_ed))
+        max_pct_mzz = max(abs(a - b) / abs(b) * 100 if b != 0 else 0
+                           for a, b in zip(mzz_h2, mzz_ed))
+        print(f"\n  h/J={h:.2f}: max deviation <Z> = {max_pct_z:.2f}%, "
+              f"max deviation <X> = {max_pct_x:.2f}%, "
+              f"max deviation <Zi Zi+1> = {max_pct_mzz:.2f}%")
+        z_ed, x_ed, mzz_ed = list(z_ed), list(x_ed), list(mzz_ed)
+    else:
+        # Dense ED (2^n x 2^n eigh) is infeasible this far past
+        # H2_ED_MAX_N -- skip it. z_h2/x_h2/mzz_h2 above are unaffected,
+        # so a noisy-vs-noiseless (no-ED) comparison at this n still works.
+        print(f"\n  h/J={h:.2f}: ED reference skipped (n={n} > "
+              f"config.H2_ED_MAX_N={config.H2_ED_MAX_N})")
+        z_ed = x_ed = mzz_ed = None
+
+    return {
+        'times': times, 'z_h2': z_h2, 'z_err': z_err,
+        'x_h2': x_h2, 'x_err': x_err,
+        'mzz_h2': mzz_h2, 'mzz_err': mzz_err,
+        'z_ed': z_ed, 'x_ed': x_ed, 'mzz_ed': mzz_ed,
+    }
 
 
 def run(local=False, noisy=False, n=None, steps=None, shots=None, timeout=None, noise_scale=None):
@@ -105,13 +178,7 @@ def run(local=False, noisy=False, n=None, steps=None, shots=None, timeout=None, 
         from local_emulator_backend import submit_quench_batch
     else:
         from qnexus_backend import submit_quench_batch
-    stage_suffix = "_local" if local else ("_noisy" if noisy else "")
-    if n != config.H2_N:
-        stage_suffix += f"_N{n}"
-    if steps != config.H2_STEPS:
-        stage_suffix += f"_S{steps}"
-    if noise_scale is not None:
-        stage_suffix += f"_scale{noise_scale:g}"
+    stage_suffix = _stage_suffix(n, steps, local, noisy, noise_scale)
     raw_stage = f"h2_emulator_raw{stage_suffix}"
     results_stage = f"h2_emulator{stage_suffix}"
 
@@ -148,53 +215,17 @@ def run(local=False, noisy=False, n=None, steps=None, shots=None, timeout=None, 
         raw_by_h[h] = batch_results
         save_stage_results(raw_stage, raw_by_h)
 
-        times, z_h2, z_err, x_h2, x_err, mzz_h2, mzz_err = [], [], [], [], [], [], []
-        for step_count in step_counts:
-            job_result = batch_results[step_count]
-            z_rms, mzz = bitstrings_to_observables(job_result["bitstrings"], n)
-            z_se, mzz_se = bootstrap_observable_errors(job_result["bitstrings"], n)
-            # <X> does not vanish by symmetry the way <Z> does (the -h*X
-            # field polarizes the ground state along +X), so it's a plain
-            # signed mean over shots -- see bitstrings_to_mx -- not the
-            # RMS formula bitstrings_to_observables uses for <Z>.
-            x_mean = bitstrings_to_mx(job_result["bitstrings_x"], n)
-            x_se = bootstrap_mx_error(job_result["bitstrings_x"], n)
-
-            times.append(step_count * config.H2_DT)
-            z_h2.append(z_rms)
-            z_err.append(z_se)
-            x_h2.append(x_mean)
-            x_err.append(x_se)
-            mzz_h2.append(mzz)
-            mzz_err.append(mzz_se)
-
-        _, z_ed, mzz_ed, x_ed = ed_time_evolution_exact(
-            n, h, config.J, config.H2_DT, steps
-        )
-
-        max_pct_z = max(abs(a - b) / abs(b) * 100 if b != 0 else 0
-                         for a, b in zip(z_h2, z_ed))
-        max_pct_x = max(abs(a - b) / abs(b) * 100 if b != 0 else 0
-                         for a, b in zip(x_h2, x_ed))
-        max_pct_mzz = max(abs(a - b) / abs(b) * 100 if b != 0 else 0
-                           for a, b in zip(mzz_h2, mzz_ed))
-        print(f"\n  h/J={h:.2f}: max deviation <Z> = {max_pct_z:.2f}%, "
-              f"max deviation <X> = {max_pct_x:.2f}%, "
-              f"max deviation <Zi Zi+1> = {max_pct_mzz:.2f}%")
-
-        results[h] = {
-            'times': times, 'z_h2': z_h2, 'z_err': z_err,
-            'x_h2': x_h2, 'x_err': x_err,
-            'mzz_h2': mzz_h2, 'mzz_err': mzz_err,
-            'z_ed': list(z_ed), 'x_ed': list(x_ed), 'mzz_ed': list(mzz_ed),
-        }
+        results[h] = _process_h_batch(n, h, steps, batch_results)
 
     save_stage_results(results_stage, results)
 
-    plot_h2_vs_ed_time(
-        config.H2_H_VALUES, results, save_dir=config.PLOT_SAVE_DIR,
-        filename=f"h2_vs_ed_time{stage_suffix}.png",
-    )
+    if n <= config.H2_ED_MAX_N:
+        plot_h2_vs_ed_time(
+            config.H2_H_VALUES, results, save_dir=config.PLOT_SAVE_DIR,
+            filename=f"h2_vs_ed_time{stage_suffix}.png",
+        )
+    else:
+        print(f"\nSkipping h2_vs_ed_time plot (n={n} > config.H2_ED_MAX_N, no ED reference).")
 
     return results
 
