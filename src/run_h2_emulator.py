@@ -230,6 +230,44 @@ def run(local=False, noisy=False, n=None, steps=None, shots=None, timeout=None, 
     return results
 
 
+def ramp_steps_for_targets(h_values):
+    """Per-target adiabatic ramp step count -- shared between
+    run_phase_transition() and run_phase_transition_zne.py so a ZNE
+    mitigation run uses the EXACT same ramp schedule as the raw
+    noisy/noiseless sweep it's being compared against (otherwise a
+    step-count difference, not noise mitigation, could explain any change
+    in deviation from ED).
+
+    A target doesn't have to *end* at h/J=1 to need the critical-slowing-down
+    treatment -- a linear ramp from H_INIT down to a target below 1 (e.g.
+    h/J=0.5, with H_INIT=4.0) passes *through* h/J=1 partway along the ramp,
+    at the same constant rate as the rest of the sweep. That transit needs
+    even *more* total time than landing on h/J=1 itself (see
+    H2_ADIABATIC_TRANSIT_TIME_FACTOR's comment in config.py for the sweep
+    that pinned this down): landing on h/J=1 only has to be adiabatic
+    approaching the gapless point, while a target past it (h/J=0.5) has to
+    stay adiabatic approaching AND leaving the gapless point within the
+    same ramp. (Confirmed empirically: h/J=0.5's <X> was 21.6% off ED on
+    the real qnexus run at the rate_ref-only step count, and still 9.00%
+    at h/J=1's own 200-step treatment, dropping to 0.43% at 400 steps;
+    h/J=2.0, whose ramp from H_INIT never crosses 1.0, was under 0.5% at
+    the plain rate_ref-based count throughout.)
+    """
+    from sweep_schedule import steps_for_target
+
+    def _ramp_steps(h):
+        if h == config.J:
+            return round(config.H2_ADIABATIC_MAX_STEPS * config.H2_ADIABATIC_CRITICAL_TIME_FACTOR)
+        if min(config.H_INIT, h) <= config.J <= max(config.H_INIT, h):
+            return round(config.H2_ADIABATIC_MAX_STEPS * config.H2_ADIABATIC_TRANSIT_TIME_FACTOR)
+        return min(
+            steps_for_target(h, config.H2_ADIABATIC_DT, config.H2_ADIABATIC_RATE_REF, h_init=config.H_INIT),
+            config.H2_ADIABATIC_MAX_STEPS,
+        )
+
+    return [_ramp_steps(h) for h in h_values]
+
+
 def run_phase_transition(local=False, noisy=False):
     """Adiabatic-ramp sweep on H2: the phase-transition signal (<Z>/<X>/
     <Zi Zi+1> vs. h/J across the h/J=1 critical point) reproduced on
@@ -299,7 +337,6 @@ def run_phase_transition(local=False, noisy=False):
         from local_emulator_backend import submit_adiabatic_batch
     else:
         from qnexus_backend import submit_adiabatic_batch
-    from sweep_schedule import steps_for_target
     stage_suffix = "_local" if local else ("_noisy" if noisy else "")
     raw_stage = f"h2_adiabatic_raw{stage_suffix}"
     results_stage = f"h2_adiabatic{stage_suffix}"
@@ -308,31 +345,7 @@ def run_phase_transition(local=False, noisy=False):
 
     h_values = list(config.H2_H_VALUES)
     dt_by_target = [config.H2_ADIABATIC_DT for _ in h_values]  # same dt for every target
-    # A target doesn't have to *end* at h/J=1 to need the critical-slowing-down
-    # treatment -- a linear ramp from H_INIT down to a target below 1 (e.g.
-    # h/J=0.5, with H_INIT=4.0) passes *through* h/J=1 partway along the ramp,
-    # at the same constant rate as the rest of the sweep. That transit needs
-    # even *more* total time than landing on h/J=1 itself (see
-    # H2_ADIABATIC_TRANSIT_TIME_FACTOR's comment in config.py for the sweep
-    # that pinned this down): landing on h/J=1 only has to be adiabatic
-    # approaching the gapless point, while a target past it (h/J=0.5) has to
-    # stay adiabatic approaching AND leaving the gapless point within the
-    # same ramp. (Confirmed empirically: h/J=0.5's <X> was 21.6% off ED on
-    # the real qnexus run at the rate_ref-only step count, and still 9.00%
-    # at h/J=1's own 200-step treatment, dropping to 0.43% at 400 steps;
-    # h/J=2.0, whose ramp from H_INIT never crosses 1.0, was under 0.5% at
-    # the plain rate_ref-based count throughout.)
-    def _ramp_steps(h):
-        if h == config.J:
-            return round(config.H2_ADIABATIC_MAX_STEPS * config.H2_ADIABATIC_CRITICAL_TIME_FACTOR)
-        if min(config.H_INIT, h) <= config.J <= max(config.H_INIT, h):
-            return round(config.H2_ADIABATIC_MAX_STEPS * config.H2_ADIABATIC_TRANSIT_TIME_FACTOR)
-        return min(
-            steps_for_target(h, config.H2_ADIABATIC_DT, config.H2_ADIABATIC_RATE_REF, h_init=config.H_INIT),
-            config.H2_ADIABATIC_MAX_STEPS,
-        )
-
-    ramp_steps_by_target = [_ramp_steps(h) for h in h_values]
+    ramp_steps_by_target = ramp_steps_for_targets(h_values)
     print(f"\nSubmitting N={config.H2_ADIABATIC_N}, h_init={config.H_INIT} -> "
           f"h_target/J in {h_values} (batched), dt={dt_by_target}, "
           f"ramp_steps={ramp_steps_by_target} (rate_ref={config.H2_ADIABATIC_RATE_REF}, "

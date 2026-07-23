@@ -43,8 +43,8 @@ from quantinuum_schemas.models.quantinuum_systems_noise import UserErrorParams
 
 from circuits import build_chain_color_edges
 from tket_circuit import (
-    append_basis_measurement, build_adiabatic_circuit, build_quench_ansatz_circuit,
-    build_quench_circuit,
+    append_basis_measurement, build_adiabatic_ansatz_circuit, build_adiabatic_circuit,
+    build_quench_ansatz_circuit, build_quench_circuit,
 )
 
 
@@ -457,6 +457,100 @@ def submit_adiabatic_batch(N, h_targets, J, ramp_steps_by_target, dt_by_target, 
             "N": N, "h_target": h_target, "J": J, "dt": dt, "ramp_steps": ramp_steps,
             "h_init": h_init, "n_shots": n_shots, "mirror": mirror,
         }
+    return out
+
+
+def submit_adiabatic_zne_batch(N, h_targets, J, ramp_steps_by_target, dt_by_target, fold_factors,
+                                n_shots, h_init, device_name="H2-Emulator", mirror=True,
+                                project_name="ftim-hackathon", job_name=None, timeout=300.0,
+                                noise_scale=None, bases=("z", "x")):
+    """ZNE analog of submit_adiabatic_batch: builds the same adiabatic-ramp
+    ansatz per h_target (build_adiabatic_ansatz_circuit -- identical ramp
+    schedule to submit_adiabatic_batch, just unmeasured), folds each one at
+    every factor in `fold_factors` (qermit's Folding.circuit, ODD integers
+    only), and measures every requested basis, all as a single
+    compile/execute batch -- same structure as submit_zne_batch, just
+    swapping the quench ansatz for the per-h adiabatic ansatz.
+
+    fold_factors=1 IS the raw-noisy baseline (Folding.circuit performs zero
+    fold iterations at noise_scaling=1), so no separate unfolded submission
+    is needed -- same convention as submit_zne_batch.
+
+    ramp_steps_by_target/dt_by_target: same per-target sequences as
+    submit_adiabatic_batch (not shared scalars) -- pass the exact same
+    values used for a prior non-ZNE run_phase_transition() call (e.g. via
+    run_h2_emulator.ramp_steps_for_targets) so the ZNE-mitigated result is
+    directly comparable to that run's raw-noisy figure, not a different
+    ramp schedule.
+
+    noise_scale: optional linear multiplier on H2-Emulator's default error
+    rates (UserErrorParams(scale=...)), independent of fold_factors -- same
+    meaning as submit_zne_batch's noise_scale.
+
+    Returns {h_target: {fold_factor: {"bitstrings": [...], "bitstrings_x": [...] (if
+    requested)}}}, matching submit_zne_batch's per-step_count shape (one
+    level up, keyed by h_target instead of step_count) so callers can reuse
+    the same zne_fit.zne_extrapolate / shot_observables.py postprocessing.
+    """
+    color_edges = build_chain_color_edges(N)
+    project = get_project(project_name)
+    job_name = job_name or f"tfim-adiabatic-zne-N{N}"
+
+    jobs = [
+        (h_target, ramp_steps, dt, fold, basis)
+        for h_target, ramp_steps, dt in zip(h_targets, ramp_steps_by_target, dt_by_target)
+        for fold in fold_factors
+        for basis in bases
+    ]
+    circuits = []
+    for h_target, ramp_steps, dt, fold, basis in jobs:
+        ansatz = build_adiabatic_ansatz_circuit(N, color_edges, ramp_steps, dt, h_target, J, h_init,
+                                                 mirror=mirror)
+        folded = Folding.circuit(ansatz, fold)[0]
+        append_basis_measurement(folded, N, basis)
+        circuits.append(folded)
+
+    circuit_refs = [
+        qnx.circuits.upload(
+            circuit=circ, name=f"{job_name}-h{h_target:.2f}-fold{fold}-{basis}", project=project,
+            description=(f"ZNE-folded TFIM adiabatic ramp: N={N}, h_init={h_init}, "
+                          f"h_target/J={h_target / J:.2f}, dt={dt}, ramp_steps={ramp_steps}, "
+                          f"fold={fold}, basis={basis}"),
+        )
+        for (h_target, ramp_steps, dt, fold, basis), circ in zip(jobs, circuits)
+    ]
+
+    config_kwargs = {}
+    if noise_scale is not None:
+        config_kwargs["error_params"] = UserErrorParams(scale=noise_scale)
+    backend_config = qnx.QuantinuumConfig(device_name=device_name, **config_kwargs)
+
+    compiled_refs = qnx.compile(
+        programs=circuit_refs, backend_config=backend_config,
+        name=f"{job_name}-compile", project=project,
+    )
+
+    results = qnx.execute(
+        programs=list(compiled_refs), n_shots=[n_shots] * len(compiled_refs),
+        backend_config=backend_config, name=job_name, project=project, timeout=timeout,
+    )
+
+    bitstrings_by = {}
+    for (h_target, ramp_steps, dt, fold, basis), result in zip(jobs, results):
+        bitstrings_by[(h_target, fold, basis)] = [
+            "".join(str(bit) for bit in shot) for shot in result.get_shots()
+        ]
+
+    out = {}
+    for h_target in h_targets:
+        out[h_target] = {}
+        for fold in fold_factors:
+            entry = {}
+            if "z" in bases:
+                entry["bitstrings"] = bitstrings_by[(h_target, fold, "z")]
+            if "x" in bases:
+                entry["bitstrings_x"] = bitstrings_by[(h_target, fold, "x")]
+            out[h_target][fold] = entry
     return out
 
 

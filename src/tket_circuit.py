@@ -237,3 +237,38 @@ def build_adiabatic_circuit(N, color_edges, ramp_steps, dt, h_target, J, h_init,
 
     append_basis_measurement(circuit, N, basis)
     return circuit
+
+
+def build_adiabatic_ansatz_circuit(N, color_edges, ramp_steps, dt, h_target, J, h_init, mirror=True):
+    """Same as build_adiabatic_circuit (identical |+...+> prep and
+    per-step-varying Trotter layers) but UNMEASURED -- no classical bits,
+    no append_basis_measurement call.
+
+    For zero-noise extrapolation on the adiabatic-ramp/phase-transition
+    protocol (see qnexus_backend.submit_adiabatic_zne_batch): qermit's
+    Folding.circuit folds a circuit by inverting its gates (gate.op.dagger),
+    which only works on unitary operations, so folding must happen on this
+    unmeasured ansatz, with the basis measurement appended afterward to
+    each already-folded copy -- mirrors build_quench_ansatz_circuit's role
+    for the fixed-h quench protocol.
+    """
+    circuit = Circuit(N)
+
+    for i in range(N):
+        circuit.H(i)
+
+    layer_angles = []
+    for step in range(1, ramp_steps + 1):
+        s_ramp = step / ramp_steps
+        h_eff = (1 - s_ramp) * h_init + s_ramp * h_target
+        J_eff = s_ramp * J
+
+        theta_x = -2 * h_eff * dt
+        theta_zz = -2 * J_eff * dt
+        x_angle = (theta_x / 2 if mirror else theta_x) / math.pi
+        zz_angle = theta_zz / math.pi
+        layer_angles.append((x_angle, zz_angle))
+
+    _append_trotter_layers(circuit, N, color_edges, layer_angles, mirror)
+
+    return circuit

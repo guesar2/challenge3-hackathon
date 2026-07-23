@@ -609,6 +609,52 @@ def plot_h2_phase_transition(h_values, h2_data, ed_results, save_dir=None, saved
     return fig
 
 
+def plot_h2_phase_transition_zne(h_values, zne_data, save_dir=None, n=None,
+                                  filename="h2_phase_transition_zne.png"):
+    """<Z>, <X>, and <Zi Zi+1> vs. h/J for the ZNE-mitigated H2 adiabatic
+    phase-transition sweep -- the ZNE analog of plot_h2_phase_transition,
+    styled like plot_zne_comparison (ED vs. raw-noisy H2-Emulator
+    fold_factor=1 vs. ZNE-mitigated, all with real bootstrap/propagated
+    error bars) but on plot_h2_phase_transition's x-axis (h/J) instead of
+    plot_zne_comparison's x-axis (time).
+
+    zne_data: dict h -> {'z_ed','z_raw','z_raw_err','z_zne','z_zne_err',
+    'x_ed','x_raw','x_raw_err','x_zne','x_zne_err',
+    'mzz_ed','mzz_raw','mzz_raw_err','mzz_zne','mzz_zne_err'}, as produced
+    by run_phase_transition_zne.run()'s `results`.
+    """
+    fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(16, 4.5))
+
+    for ax, key, ylabel, title in (
+        (ax1, 'z', r'$\langle Z \rangle$', 'ZNE Phase Transition (H2 Emulator) — <Z>'),
+        (ax2, 'x', r'$\langle X \rangle$', 'ZNE Phase Transition (H2 Emulator) — <X>'),
+        (ax3, 'mzz', r'$\langle Z_i Z_{i+1} \rangle$', 'ZNE Phase Transition (H2 Emulator) — <Zi Zi+1>'),
+    ):
+        ed = [zne_data[h][f'{key}_ed'] for h in h_values]
+        raw = [zne_data[h][f'{key}_raw'] for h in h_values]
+        raw_err = [zne_data[h][f'{key}_raw_err'] for h in h_values]
+        zne = [zne_data[h][f'{key}_zne'] for h in h_values]
+        zne_err = [zne_data[h][f'{key}_zne_err'] for h in h_values]
+
+        ax.plot(h_values, ed, 'rs--', markersize=8, label='ED (ground state)')
+        ax.errorbar(h_values, raw, yerr=raw_err, fmt='m^', markersize=8, capsize=4,
+                    label='H2-Emulator (raw noisy)')
+        ax.errorbar(h_values, zne, yerr=zne_err, fmt='go', markersize=8, capsize=4,
+                    label='ZNE-mitigated')
+        ax.axvline(x=1.0, color='gray', linestyle=':', alpha=0.7, label='Critical h/J=1')
+        ax.set_xlabel('Target h / J')
+        ax.set_ylabel(ylabel)
+        ax.set_title(title)
+        ax.grid(True, alpha=0.3)
+        ax.legend(fontsize=8)
+
+    title = 'ED vs. raw-noisy vs. ZNE-mitigated (H2 adiabatic phase transition)' + (f' -- N={n}' if n is not None else '')
+    fig.suptitle(title, fontsize=11)
+
+    _finalize(fig, filename, save_dir)
+    return fig
+
+
 def plot_vqe_convergence(h_values, vqe_data, ed_results, save_dir=None, saved_at=None,
                           filename="vqe_convergence.png"):
     """VQE energy vs. COBYLA iteration, one subplot per h/J target, with
