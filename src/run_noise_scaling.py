@@ -60,6 +60,13 @@ os.chdir(_REPO_ROOT)
 # (hardware noise, Trotter error cancelled) still works at every N here.
 NOISE_SCALING_N_VALUES = (4, 6, 8, 12, 16, 20, 26)
 
+# qnx.execute()'s own default wait (300s) was enough through N=8, but timed
+# out client-side submitting N=12's noisy (H2-Emulator) leg -- larger
+# circuits and the noisy device's real error-model simulation (heavier than
+# H2-1LE's plain statevector) push past it as N grows. Reuse
+# DEPTH_SCALING_TIMEOUT's value (see its comment below) for every N here.
+NOISE_SCALING_TIMEOUT = 1800.0
+
 # Depth scan: fixed N, sweep Trotter steps far enough that gate count
 # (~N two-qubit gates/step) crosses the brief's ~50-gate noise-dominated
 # threshold. At N=8, 30 steps -> ~240 two-qubit gates alone.
@@ -134,15 +141,20 @@ def _compare(label, sim_data, ref_data, ref_is_ed):
 
 
 def run_noise_scaling(n_values=NOISE_SCALING_N_VALUES):
-    """N-scan at the default circuit depth (config.H2_STEPS)."""
+    """N-scan at the default circuit depth (config.H2_STEPS).
+
+    Always runs config.H2_H_VALUES in full -- run() (which this calls)
+    loops over config.H2_H_VALUES directly and has no per-h override. Use
+    run_noise_scaling_async's h_values param for a cheaper single-h sweep.
+    """
     all_summaries = {}
     for n in n_values:
         print("\n" + "#" * 60)
         print(f"# NOISE SCALING: N={n}")
         print("#" * 60)
 
-        noiseless_results = run(local=False, noisy=False, n=n)
-        noisy_results = run(local=False, noisy=True, n=n)
+        noiseless_results = run(local=False, noisy=False, n=n, timeout=NOISE_SCALING_TIMEOUT)
+        noisy_results = run(local=False, noisy=True, n=n, timeout=NOISE_SCALING_TIMEOUT)
         if noiseless_results is None or noisy_results is None:
             print(f"N={n}: skipped (config.RUN_ON_H2_EMULATOR is False) -- "
                   "enable it in config.py to actually submit to qnexus.")
@@ -151,6 +163,118 @@ def run_noise_scaling(n_values=NOISE_SCALING_N_VALUES):
         filename = f"h2_noise_comparison_N{n}.png"
         plot_h2_noise_comparison(
             config.H2_H_VALUES, noiseless_results, noisy_results,
+            save_dir=config.PLOT_SAVE_DIR, n=n, filename=filename,
+        )
+
+        if n <= config.H2_ED_MAX_N:
+            print(f"\nN={n} -- Trotter error (noiseless vs ED):")
+            trotter = _compare("noiseless vs ED", noiseless_results, noiseless_results, ref_is_ed=True)
+        else:
+            print(f"\nN={n} -- Trotter error vs ED skipped (n > config.H2_ED_MAX_N="
+                  f"{config.H2_ED_MAX_N}, dense ED infeasible at this N)")
+            trotter = None
+        print(f"\nN={n} -- Hardware noise (noisy vs noiseless, same circuit):")
+        hw_noise = _compare("noisy vs noiseless", noisy_results, noiseless_results, ref_is_ed=False)
+        all_summaries[n] = {'trotter_error': trotter, 'hardware_noise': hw_noise}
+
+    return all_summaries
+
+
+def run_noise_scaling_async(n_values=NOISE_SCALING_N_VALUES, timeout=NOISE_SCALING_TIMEOUT,
+                             h_values=None):
+    """Async counterpart to run_noise_scaling(): submits every (N, device,
+    h) combination in n_values UP FRONT via qnexus_backend.start_quench_batch
+    (non-blocking), so they all queue concurrently on Nexus, THEN collects
+    every one via collect_quench_batch. run_noise_scaling() submits-and-
+    waits one (N, device, h) batch at a time -- with len(n_values) * 2 *
+    len(h_values) batches total, that means paying every batch's
+    queue-wait in sequence; submitting first decouples "how long one job
+    waits in Nexus's queue" from "how many jobs we're running", so total
+    wall time tracks the slowest single job, not the sum of all of them.
+
+    h_values: overrides config.H2_H_VALUES for this call only (e.g. a
+    single h/J to cut the sweep's batch count -- and quota/time cost -- by
+    len(config.H2_H_VALUES)x, without touching the global config every
+    other stage reads). Unlike run_noise_scaling() (which calls run(), and
+    run() always loops over config.H2_H_VALUES with no override), this
+    function builds circuits directly, so it can honor h_values cleanly.
+
+    Same N range (modulo h_values), same H2_ED_MAX_N-gated ED comparison
+    (see run()'s and _process_h_batch's docstrings), same figures/summaries/
+    saved-stage names as run_noise_scaling() -- this changes submission
+    order (and optionally h coverage) only, not how a given h is measured
+    or reported. Reuses run_h2_emulator's _process_h_batch/_stage_suffix so
+    both submission paths postprocess and name files identically.
+
+    timeout: passed to each job's collect_quench_batch call individually
+    (see its docstring) -- since jobs are submitted independently, one
+    slow job timing out doesn't block collecting the others before it
+    (though a KeyError/exception in one collect call still stops this
+    function the same way an exception anywhere in run_noise_scaling()
+    would; each batch's raw results are still saved as they're collected,
+    same persist-immediately guarantee run() gives its own caller).
+    """
+    from run_h2_emulator import _process_h_batch, _stage_suffix
+    from persistence import save_stage_results
+    from plotting import plot_h2_vs_ed_time
+    from qnexus_backend import start_quench_batch, collect_quench_batch
+
+    if not config.RUN_ON_H2_EMULATOR:
+        print("Skipped (config.RUN_ON_H2_EMULATOR = False). Enable it to submit "
+              "jobs to qnexus -- this consumes a metered usage quota.")
+        return None
+
+    h_values = config.H2_H_VALUES if h_values is None else h_values
+    step_counts = list(range(1, config.H2_STEPS + 1))
+    total_batches = len(n_values) * 2 * len(h_values)
+
+    print("\n" + "#" * 60)
+    print(f"# SUBMITTING {total_batches} batches ({len(n_values)} N-values x 2 devices x "
+          f"{len(h_values)} h-values) -- not waiting for results yet")
+    print("#" * 60)
+    pending = {}  # (n, noisy, h) -> start_quench_batch's pending handle
+    for n in n_values:
+        for noisy in (False, True):
+            device_name = config.H2_DEVICE_NAME_NOISY if noisy else config.H2_DEVICE_NAME
+            for h in h_values:
+                print(f"  submitting N={n}, noisy={noisy}, h/J={h:.2f} to {device_name} ...")
+                pending[(n, noisy, h)] = start_quench_batch(
+                    n, h, config.J, config.H2_DT, step_counts, config.H2_SHOTS,
+                    device_name=device_name, project_name=config.H2_PROJECT_NAME,
+                )
+    print(f"\nAll {total_batches} batches submitted -- collecting results now.")
+
+    all_summaries = {}
+    for n in n_values:
+        print("\n" + "#" * 60)
+        print(f"# COLLECTING: N={n}")
+        print("#" * 60)
+
+        results_by_noisy = {}
+        for noisy in (False, True):
+            stage_suffix = _stage_suffix(n, config.H2_STEPS, local=False, noisy=noisy)
+            raw_by_h = {}
+            results = {}
+            for h in h_values:
+                batch_results = collect_quench_batch(pending[(n, noisy, h)], timeout=timeout)
+                # Persist immediately, same as run() -- a bug downstream in
+                # _process_h_batch should never mean resubmitting to recover
+                # raw data that already came back.
+                raw_by_h[h] = batch_results
+                save_stage_results(f"h2_emulator_raw{stage_suffix}", raw_by_h)
+                results[h] = _process_h_batch(n, h, config.H2_STEPS, batch_results)
+            save_stage_results(f"h2_emulator{stage_suffix}", results)
+            if n <= config.H2_ED_MAX_N:
+                plot_h2_vs_ed_time(
+                    h_values, results, save_dir=config.PLOT_SAVE_DIR,
+                    filename=f"h2_vs_ed_time{stage_suffix}.png",
+                )
+            results_by_noisy[noisy] = results
+
+        noiseless_results, noisy_results = results_by_noisy[False], results_by_noisy[True]
+        filename = f"h2_noise_comparison_N{n}.png"
+        plot_h2_noise_comparison(
+            h_values, noiseless_results, noisy_results,
             save_dir=config.PLOT_SAVE_DIR, n=n, filename=filename,
         )
 
@@ -201,5 +325,7 @@ def run_depth_scaling(n=DEPTH_SCALING_N, steps=DEPTH_SCALING_STEPS, shots=DEPTH_
 if __name__ == "__main__":
     if "--depth" in sys.argv:
         run_depth_scaling()
+    elif "--async" in sys.argv:
+        run_noise_scaling_async()
     else:
         run_noise_scaling()
