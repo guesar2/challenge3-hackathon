@@ -359,7 +359,7 @@ def submit_zne_batch(N, h_field, J, dt, step_counts, fold_factors, n_shots, devi
 
 
 def submit_adiabatic_batch(N, h_targets, J, ramp_steps_by_target, dt_by_target, n_shots, h_init,
-                            device_name="H2-1LE", mirror=True, project_name="ftim-hackathon", job_name=None):
+                            device_name="H2-1LE", mirror=True, project_name="ftim-hackathon", job_name=None, timeout=config.QNEXUS_TIMEOUT):
     """Build, upload, and run an adiabatic-ramp Trotter circuit (h_init ->
     h_target, J: 0 -> J, starting from |+...+>) for every h in `h_targets`
     in a single compile job and a single execute job.
@@ -431,6 +431,7 @@ def submit_adiabatic_batch(N, h_targets, J, ramp_steps_by_target, dt_by_target, 
         backend_config=backend_config,
         name=job_name,
         project=project,
+        timeout=config.QNEXUS_TIMEOUT
     )
 
     bitstrings_by = {}
