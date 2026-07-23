@@ -409,39 +409,42 @@ def plot_h2_noise_comparison(h_values, noiseless_data, noisy_data, save_dir=None
 
 def plot_zne_comparison(h_values, zne_data, save_dir=None, n=None,
                          filename="h2_zne_comparison.png"):
-    """<Z>, <X>, and <Zi Zi+1> at one fixed (h, step_count) point per h/J: ED
-    (exact) vs. raw-noisy H2-Emulator (qermit Folding.circuit's fold_factor=1,
-    with a real bootstrap error bar) vs. ZNE-mitigated (zne_fit.zne_extrapolate's
-    zero-noise-limit fit, with its own propagated error bar). Unlike
-    plot_h2_noise_comparison, this plots single points per h (not a
-    times-series curve), since ZNE here targets one fixed circuit depth --
-    see run_zne.run()'s docstring.
+    """<Z>, <X>, and <Zi Zi+1> vs. time for the ZNE-mitigated H2 quench,
+    overlaying ED (exact), raw-noisy H2-Emulator (qermit Folding.circuit's
+    fold_factor=1, with a real bootstrap error bar), and ZNE-mitigated
+    (zne_fit.zne_extrapolate's zero-noise-limit fit, with its own
+    propagated error bar) -- same x-axis/time convention as
+    plot_h2_noise_comparison.
 
-    zne_data: dict h -> {'z_ed','x_ed','mzz_ed', 'z_raw','z_raw_err',
-    'x_raw','x_raw_err','mzz_raw','mzz_raw_err', 'z_zne','z_zne_err',
-    'x_zne','x_zne_err','mzz_zne','mzz_zne_err'}, as produced by
-    run_zne.run()'s `results`.
+    zne_data: dict h -> {'times', 'z_ed','z_raw','z_raw_err','z_zne',
+    'z_zne_err', 'mzz_ed','mzz_raw','mzz_raw_err','mzz_zne','mzz_zne_err',
+    and optionally 'x_ed','x_raw','x_raw_err','x_zne','x_zne_err'}, as
+    produced by run_zne.run()'s `results`. The <X> column is only drawn if
+    every h in `h_values` has x_* entries -- run_zne.run(bases=("z",))
+    (e.g. a cheap trial run covering only <Zi Zi+1>) omits them, and this
+    just drops that column rather than erroring.
     """
-    fig, axes = plt.subplots(len(h_values), 3, figsize=(17, 4 * len(h_values)))
+    all_columns = (
+        ('z', r'$\langle Z \rangle$ (RMS per site)'),
+        ('x', r'$\langle X \rangle$ (mean per site)'),
+        ('mzz', r'$\langle Z_i Z_{i+1} \rangle$'),
+    )
+    columns = [(key, ylabel) for key, ylabel in all_columns
+               if all(f'{key}_raw' in zne_data[h] for h in h_values)]
 
-    for idx, h in enumerate(h_values):
+    fig, axes = plt.subplots(len(h_values), len(columns),
+                              figsize=(6 * len(columns) + 2, 4 * len(h_values)), squeeze=False)
+
+    for row_idx, h in enumerate(h_values):
         r = zne_data[h]
-        row = axes[idx] if len(h_values) > 1 else axes
-
-        panels = (
-            (row[0], 'z', r'$\langle Z \rangle$ (RMS per site)'),
-            (row[1], 'x', r'$\langle X \rangle$ (mean per site)'),
-            (row[2], 'mzz', r'$\langle Z_i Z_{i+1} \rangle$'),
-        )
-        for ax, key, ylabel in panels:
-            ax.axhline(r[f'{key}_ed'], color='r', linewidth=2, label='ED (exact)')
-            ax.errorbar([0], [r[f'{key}_raw']], yerr=[r[f'{key}_raw_err']], fmt='m^',
-                        markersize=10, capsize=4, label='H2-Emulator (raw noisy)')
-            ax.errorbar([1], [r[f'{key}_zne']], yerr=[r[f'{key}_zne_err']], fmt='go',
-                        markersize=10, capsize=4, label='ZNE-mitigated')
-            ax.set_xticks([0, 1])
-            ax.set_xticklabels(['raw', 'ZNE'])
-            ax.set_xlim(-0.5, 1.5)
+        for col_idx, (key, ylabel) in enumerate(columns):
+            ax = axes[row_idx][col_idx]
+            ax.plot(r['times'], r[f'{key}_ed'], 'r-', linewidth=2, label='ED (exact)')
+            ax.errorbar(r['times'], r[f'{key}_raw'], yerr=r[f'{key}_raw_err'], fmt='m^', markersize=6,
+                        capsize=4, label='H2-Emulator (raw noisy)')
+            ax.errorbar(r['times'], r[f'{key}_zne'], yerr=r[f'{key}_zne_err'], fmt='go', markersize=6,
+                        capsize=4, label='ZNE-mitigated')
+            ax.set_xlabel('Time t')
             ax.set_ylabel(ylabel)
             ax.set_title(f'h/J = {h:.1f}' + (f', N={n}' if n is not None else ''))
             ax.grid(True, alpha=0.3)
