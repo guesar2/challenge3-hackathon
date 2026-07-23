@@ -179,20 +179,29 @@ def submit_quench_batch(N, h_field, J, dt, step_counts, n_shots, device_name="H2
     return out
 
 
-def submit_zne_batch(N, h_field, J, dt, steps, fold_factors, n_shots, device_name="H2-Emulator",
+def submit_zne_batch(N, h_field, J, dt, step_counts, fold_factors, n_shots, device_name="H2-Emulator",
                       mirror=True, initial_state_label=None, project_name="ftim-hackathon",
-                      job_name=None, timeout=300.0, noise_scale=None):
-    """Build, upload, and run one Trotter quench ansatz, folded by every factor
-    in `fold_factors` (qermit's Folding.circuit -- e.g. (1, 3, 5), ODD integers
-    only -- see Folding.circuit's own ValueError otherwise), each measured in
-    both Z and X basis, as a single compile/execute batch -- same batching
-    rationale as submit_quench_batch, just folding-scaled instead of
-    step-count-scaled.
+                      job_name=None, timeout=300.0, noise_scale=None, bases=("z", "x")):
+    """Build, upload, and run a Trotter quench ansatz for every step count in
+    `step_counts` (e.g. the whole 1..H2_STEPS curve, matching
+    submit_quench_batch's step_counts convention), each folded by every
+    factor in `fold_factors` (qermit's Folding.circuit -- e.g. (1, 3, 5),
+    ODD integers only -- see Folding.circuit's own ValueError otherwise) and
+    measured in every basis in `bases`, all as a single compile/execute
+    batch -- same batching rationale as submit_quench_batch, just with two
+    extra axes (fold factor, and optionally a restricted basis set) folded
+    into the one round trip.
 
     fold_factors: noise-scaling multipliers for Folding.circuit. Folding.circuit
     with noise_scaling=1 performs zero fold iterations and returns the plain
     unfolded circuit unchanged (verified directly) -- so fold_factors=1 IS the
     raw-noisy baseline circuit, not a separate submission.
+
+    bases: which measurement bases to include -- defaults to both Z and X
+    (needed for <Z>/<Zi Zi+1> and <X> respectively). Pass ("z",) alone when
+    only Z-basis observables are needed (e.g. testing with <Zi Zi+1> only),
+    to roughly halve the circuit count of a trial run before committing to
+    the full sweep.
 
     Folded circuits are still built from the same native Rx/ZZPhase gate types
     as every other circuit this module submits (Folding.circuit inverts gates
@@ -207,33 +216,32 @@ def submit_zne_batch(N, h_field, J, dt, steps, fold_factors, n_shots, device_nam
     noise model, fold_factors scales noise via *circuit* folding. Two
     different knobs, kept distinctly named on purpose.
 
-    Returns {fold_factor: {"bitstrings": [...], "bitstrings_x": [...]}},
-    matching submit_quench_batch's per-key shape so callers can reuse
-    shot_observables.py's bitstrings_to_observables/bitstrings_to_mx/
-    bootstrap_* functions unchanged.
+    Returns {step_count: {fold_factor: {"bitstrings": [...], "bitstrings_x": [...] (if
+    requested)}}}, matching submit_quench_batch's per-step_count shape (one
+    level up) so callers can reuse shot_observables.py's
+    bitstrings_to_observables/bitstrings_to_mx/bootstrap_* functions
+    unchanged at each (step_count, fold_factor) point.
     """
     color_edges = build_chain_color_edges(N)
     project = get_project(project_name)
     job_name = job_name or f"tfim-zne-N{N}-h{h_field:.2f}"
 
-    ansatz = build_quench_ansatz_circuit(N, color_edges, steps, dt, h_field, J, mirror=mirror,
-                                          initial_state_label=initial_state_label)
-
-    bases = ("z", "x")
-    jobs = [(fold, basis) for fold in fold_factors for basis in bases]
+    jobs = [(steps, fold, basis) for steps in step_counts for fold in fold_factors for basis in bases]
     circuits = []
-    for fold, basis in jobs:
+    for steps, fold, basis in jobs:
+        ansatz = build_quench_ansatz_circuit(N, color_edges, steps, dt, h_field, J, mirror=mirror,
+                                              initial_state_label=initial_state_label)
         folded = Folding.circuit(ansatz, fold)[0]
         append_basis_measurement(folded, N, basis)
         circuits.append(folded)
 
     circuit_refs = [
         qnx.circuits.upload(
-            circuit=circ, name=f"{job_name}-fold{fold}-{basis}", project=project,
+            circuit=circ, name=f"{job_name}-steps{steps}-fold{fold}-{basis}", project=project,
             description=(f"ZNE-folded TFIM quench: N={N}, h/J={h_field / J:.2f}, "
                           f"dt={dt}, steps={steps}, fold={fold}, basis={basis}"),
         )
-        for (fold, basis), circ in zip(jobs, circuits)
+        for (steps, fold, basis), circ in zip(jobs, circuits)
     ]
 
     config_kwargs = {}
@@ -252,13 +260,22 @@ def submit_zne_batch(N, h_field, J, dt, steps, fold_factors, n_shots, device_nam
     )
 
     bitstrings_by = {}
-    for (fold, basis), result in zip(jobs, results):
-        bitstrings_by[(fold, basis)] = ["".join(str(bit) for bit in shot) for shot in result.get_shots()]
+    for (steps, fold, basis), result in zip(jobs, results):
+        bitstrings_by[(steps, fold, basis)] = [
+            "".join(str(bit) for bit in shot) for shot in result.get_shots()
+        ]
 
-    return {
-        fold: {"bitstrings": bitstrings_by[(fold, "z")], "bitstrings_x": bitstrings_by[(fold, "x")]}
-        for fold in fold_factors
-    }
+    out = {}
+    for steps in step_counts:
+        out[steps] = {}
+        for fold in fold_factors:
+            entry = {}
+            if "z" in bases:
+                entry["bitstrings"] = bitstrings_by[(steps, fold, "z")]
+            if "x" in bases:
+                entry["bitstrings_x"] = bitstrings_by[(steps, fold, "x")]
+            out[steps][fold] = entry
+    return out
 
 
 def submit_adiabatic_batch(N, h_targets, J, ramp_steps_by_target, dt_by_target, n_shots, h_init,
