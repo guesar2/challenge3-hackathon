@@ -1,0 +1,66 @@
+============================================================================
+ U/t = 0     2x2 periodic, half filling     (Trotter order 2, dt=0.05, t=1.00/t, init=neel, VQE p=3)
+============================================================================
+                                             <N>           <D>        m_stag
+----------------------------------------------------------------------------
+ ED  ground state      (exact)          4.000000      0.250000     -0.000000
+    VQE      deviation                    0.00 %        0.01 % +3.35e-04 abs
+----------------------------------------------------------------------------
+ ED  quench @ t=1.00/t  (exact)         4.000000      0.242502      0.086589
+    Trotter  deviation                    0.00 %        0.00 %        0.00 %
+----------------------------------------------------------------------------
+ ground-state energy:  ED = -4.000000   VQE = -3.999078   (0.02 %)
+  note: ED ground state is 4-fold degenerate at this U; ED values are the
+        ensemble average over that manifold, so the VQE deviation is not a pure
+        accuracy measure.
+  note: m_stag = 0 in the exact ground state is required by SU(2) symmetry on a
+        finite cluster, not a numerical accident; the VQE row is non-zero
+        because its Neel-referenced ansatz does not restore that symmetry.
+
+============================================================================
+ U/t = 1     2x2 periodic, half filling     (Trotter order 2, dt=0.05, t=1.00/t, init=neel, VQE p=3)
+============================================================================
+                                             <N>           <D>        m_stag
+----------------------------------------------------------------------------
+ ED  ground state      (exact)          4.000000      0.144497      0.000000
+    VQE      deviation                    0.00 %        5.87 % -2.75e-01 abs
+----------------------------------------------------------------------------
+ ED  quench @ t=1.00/t  (exact)         4.000000      0.226912      0.080733
+    Trotter  deviation                    0.00 %        0.02 %        0.08 %
+----------------------------------------------------------------------------
+ ground-state energy:  ED = -3.340848   VQE = -3.161305   (5.37 %)
+  note: m_stag = 0 in the exact ground state is required by SU(2) symmetry on a
+        finite cluster, not a numerical accident; the VQE row is non-zero
+        because its Neel-referenced ansatz does not restore that symmetry.
+
+============================================================================
+ U/t = 4     2x2 periodic, half filling     (Trotter order 2, dt=0.05, t=1.00/t, init=neel, VQE p=3)
+============================================================================
+                                             <N>           <D>        m_stag
+----------------------------------------------------------------------------
+ ED  ground state      (exact)          4.000000      0.071831     -0.000000
+    VQE      deviation                    0.00 %        0.14 % -3.94e-01 abs
+----------------------------------------------------------------------------
+ ED  quench @ t=1.00/t  (exact)         4.000000      0.117979      0.105783
+    Trotter  deviation                    0.00 %        0.32 %        0.86 %
+----------------------------------------------------------------------------
+ ground-state energy:  ED = -2.102748   VQE = -1.736436   (17.42 %)
+  note: m_stag = 0 in the exact ground state is required by SU(2) symmetry on a
+        finite cluster, not a numerical accident; the VQE row is non-zero
+        because its Neel-referenced ansatz does not restore that symmetry.
+
+============================================================================
+ U/t = 8     2x2 periodic, half filling     (Trotter order 2, dt=0.05, t=1.00/t, init=neel, VQE p=3)
+============================================================================
+                                             <N>           <D>        m_stag
+----------------------------------------------------------------------------
+ ED  ground state      (exact)          4.000000      0.032498      0.000000
+    VQE      deviation                    0.00 %       18.84 % +4.39e-01 abs
+----------------------------------------------------------------------------
+ ED  quench @ t=1.00/t  (exact)         4.000000      0.036790      0.327880
+    Trotter  deviation                    0.00 %        1.64 %        1.12 %
+----------------------------------------------------------------------------
+ ground-state energy:  ED = -1.320235   VQE = -0.985355   (25.37 %)
+  note: m_stag = 0 in the exact ground state is required by SU(2) symmetry on a
+        finite cluster, not a numerical accident; the VQE row is non-zero
+        because its Neel-referenced ansatz does not restore that symmetry.

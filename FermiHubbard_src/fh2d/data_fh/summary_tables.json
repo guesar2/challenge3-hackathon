@@ -1,0 +1,129 @@
+{
+  "stage": "summary_tables",
+  "timestamp": 1784840540.5476546,
+  "results": {
+    "lattice": [
+      2,
+      2
+    ],
+    "t": 1.0,
+    "dt": 0.05,
+    "steps": 20,
+    "order": 2,
+    "initial_state": "neel",
+    "rows": [
+      {
+        "U": 0.0,
+        "degeneracy": 4,
+        "ed_ground": {
+          "total_particles": 4.000000000000001,
+          "avg_double_occupancy": 0.25000000000000006,
+          "staggered_magnetization": -2.7755575615628914e-17
+        },
+        "ed_quench": {
+          "total_particles": 4.0,
+          "avg_double_occupancy": 0.2425023286644708,
+          "staggered_magnetization": 0.0865890947840971
+        },
+        "trotter_quench": {
+          "total_particles": 4.0,
+          "avg_double_occupancy": 0.24250232866447066,
+          "staggered_magnetization": 0.08658909478409713
+        },
+        "vqe_ground": {
+          "total_particles": 3.9999999999999942,
+          "avg_double_occupancy": 0.25001340750760365,
+          "staggered_magnetization": 0.0003346982180264116
+        },
+        "vqe_energy": -3.9990779459380477,
+        "ed_energy": -4.000000000000002,
+        "vqe_energy_error_percent": 0.02305135154885284,
+        "vqe_layers": 3
+      },
+      {
+        "U": 1.0,
+        "degeneracy": 1,
+        "ed_ground": {
+          "total_particles": 3.9999999999999987,
+          "avg_double_occupancy": 0.14449677222842672,
+          "staggered_magnetization": 5.759281940243e-16
+        },
+        "ed_quench": {
+          "total_particles": 4.0,
+          "avg_double_occupancy": 0.2269117308483873,
+          "staggered_magnetization": 0.08073295862080755
+        },
+        "trotter_quench": {
+          "total_particles": 4.0,
+          "avg_double_occupancy": 0.22687431605291253,
+          "staggered_magnetization": 0.08066613705180516
+        },
+        "vqe_ground": {
+          "total_particles": 4.000000000000003,
+          "avg_double_occupancy": 0.1529790806337955,
+          "staggered_magnetization": -0.2751877447954866
+        },
+        "vqe_energy": -3.1613046544374965,
+        "ed_energy": -3.340847617248345,
+        "vqe_energy_error_percent": 5.374173963634031,
+        "vqe_layers": 3
+      },
+      {
+        "U": 4.0,
+        "degeneracy": 1,
+        "ed_ground": {
+          "total_particles": 4.0,
+          "avg_double_occupancy": 0.07183134317251352,
+          "staggered_magnetization": -1.1102230246251565e-16
+        },
+        "ed_quench": {
+          "total_particles": 4.0,
+          "avg_double_occupancy": 0.11797904203369078,
+          "staggered_magnetization": 0.10578256621663709
+        },
+        "trotter_quench": {
+          "total_particles": 4.0,
+          "avg_double_occupancy": 0.11760075567411504,
+          "staggered_magnetization": 0.10669374538905091
+        },
+        "vqe_ground": {
+          "total_particles": 3.999999999999995,
+          "avg_double_occupancy": 0.071932752153189,
+          "staggered_magnetization": -0.3939387572190903
+        },
+        "vqe_energy": -1.7364357077655228,
+        "ed_energy": -2.102748483462075,
+        "vqe_energy_error_percent": 17.420665313876988,
+        "vqe_layers": 3
+      },
+      {
+        "U": 8.0,
+        "degeneracy": 1,
+        "ed_ground": {
+          "total_particles": 4.0,
+          "avg_double_occupancy": 0.03249797290752605,
+          "staggered_magnetization": 1.1796119636642288e-16
+        },
+        "ed_quench": {
+          "total_particles": 4.0,
+          "avg_double_occupancy": 0.036789716502442664,
+          "staggered_magnetization": 0.32788016890230853
+        },
+        "trotter_quench": {
+          "total_particles": 4.0,
+          "avg_double_occupancy": 0.03618715124373982,
+          "staggered_magnetization": 0.33155299498619706
+        },
+        "vqe_ground": {
+          "total_particles": 3.999999999999996,
+          "avg_double_occupancy": 0.02637410205474802,
+          "staggered_magnetization": 0.4392683013971065
+        },
+        "vqe_energy": -0.9853545306149118,
+        "ed_energy": -1.3202349582719286,
+        "vqe_energy_error_percent": 25.365214393000606,
+        "vqe_layers": 3
+      }
+    ]
+  }
+}
