@@ -38,9 +38,14 @@ Nothing in this module executes on import. It's only invoked from
 ftim_main.py when config.RUN_ON_H2_EMULATOR is explicitly set to True.
 """
 import qnexus as qnx
+from qermit.zero_noise_extrapolation.zne import Folding
+from quantinuum_schemas.models.quantinuum_systems_noise import UserErrorParams
 
 from circuits import build_chain_color_edges
-from tket_circuit import build_quench_circuit, build_adiabatic_circuit
+from tket_circuit import (
+    append_basis_measurement, build_adiabatic_circuit, build_quench_ansatz_circuit,
+    build_quench_circuit,
+)
 
 
 def get_project(project_name: str):
@@ -50,7 +55,8 @@ def get_project(project_name: str):
 
 def submit_quench_batch(N, h_field, J, dt, step_counts, n_shots, device_name="H2-1LE",
                          initial_state_label=None, mirror=True,
-                         project_name="ftim-hackathon", job_name=None, timeout=300.0):
+                         project_name="ftim-hackathon", job_name=None, timeout=300.0,
+                         noise_scale=None):
     """Build, upload, and run a Trotter quench circuit for every step count
     in `step_counts` (e.g. the whole 1..H2_STEPS curve for one h) in a
     single compile job and a single execute job, rather than one round trip
@@ -84,6 +90,18 @@ def submit_quench_batch(N, h_field, J, dt, step_counts, n_shots, device_name="H2
     TimeoutError from qnx.execute() itself (client-side only, the job
     keeps running server-side), so bump this for large step-count x shots
     sweeps (e.g. a Trotter-depth scan) rather than hitting that.
+
+    noise_scale: optional linear multiplier on H2-Emulator's default
+    gate/SPAM/crosstalk/dephasing error rates, passed through as
+    UserErrorParams(scale=noise_scale) on the QuantinuumConfig
+    (docs.quantinuum.com/systems/user_guide/emulator_user_guide/noise_model.html:
+    "A scaling factor can be applied that multiplies all the default or
+    supplied error parameters by the scaling rate. [...] a 1 does not
+    change the error rates while 0 makes all the errors have a probability
+    of 0."). None (default) leaves the device's own default noise model
+    untouched. Only meaningful against a noisy device (H2-Emulator) --
+    H2-1LE is exact noiseless state-vector emulation and has no error
+    model to scale.
     """
     color_edges = build_chain_color_edges(N)
     project = get_project(project_name)
@@ -106,7 +124,10 @@ def submit_quench_batch(N, h_field, J, dt, step_counts, n_shots, device_name="H2
         for (steps, basis), circ in zip(((s, b) for s in step_counts for b in bases), circuits)
     ]
 
-    backend_config = qnx.QuantinuumConfig(device_name=device_name)
+    config_kwargs = {}
+    if noise_scale is not None:
+        config_kwargs["error_params"] = UserErrorParams(scale=noise_scale)
+    backend_config = qnx.QuantinuumConfig(device_name=device_name, **config_kwargs)
     # Our circuit is built from Rx/ZZPhase; H2's native gateset doesn't
     # include a raw Rx (it wants Rz/PhasedX/ZZPhase/...), so it must be
     # rebased via a compile job before execute() will accept it. Compile
@@ -153,7 +174,107 @@ def submit_quench_batch(N, h_field, J, dt, step_counts, n_shots, device_name="H2
             "N": N, "h_field": h_field, "J": J, "dt": dt, "steps": steps,
             "n_shots": n_shots, "mirror": mirror,
             "initial_state_label": initial_state_label or ("0" * N),
+            "noise_scale": noise_scale,
         }
+    return out
+
+
+def submit_zne_batch(N, h_field, J, dt, step_counts, fold_factors, n_shots, device_name="H2-Emulator",
+                      mirror=True, initial_state_label=None, project_name="ftim-hackathon",
+                      job_name=None, timeout=300.0, noise_scale=None, bases=("z", "x")):
+    """Build, upload, and run a Trotter quench ansatz for every step count in
+    `step_counts` (e.g. the whole 1..H2_STEPS curve, matching
+    submit_quench_batch's step_counts convention), each folded by every
+    factor in `fold_factors` (qermit's Folding.circuit -- e.g. (1, 3, 5),
+    ODD integers only -- see Folding.circuit's own ValueError otherwise) and
+    measured in every basis in `bases`, all as a single compile/execute
+    batch -- same batching rationale as submit_quench_batch, just with two
+    extra axes (fold factor, and optionally a restricted basis set) folded
+    into the one round trip.
+
+    fold_factors: noise-scaling multipliers for Folding.circuit. Folding.circuit
+    with noise_scaling=1 performs zero fold iterations and returns the plain
+    unfolded circuit unchanged (verified directly) -- so fold_factors=1 IS the
+    raw-noisy baseline circuit, not a separate submission.
+
+    bases: which measurement bases to include -- defaults to both Z and X
+    (needed for <Z>/<Zi Zi+1> and <X> respectively). Pass ("z",) alone when
+    only Z-basis observables are needed (e.g. testing with <Zi Zi+1> only),
+    to roughly halve the circuit count of a trial run before committing to
+    the full sweep.
+
+    Folded circuits are still built from the same native Rx/ZZPhase gate types
+    as every other circuit this module submits (Folding.circuit inverts gates
+    via their own .dagger, it doesn't introduce new gate types), so they
+    compile to H2's native gateset the same way via qnx.compile() below -- no
+    local rebase pass is needed here, unlike a design that folds circuits
+    outside of a submission batch.
+
+    noise_scale: optional linear multiplier on H2-Emulator's default error
+    rates (UserErrorParams(scale=...), same meaning as submit_quench_batch's
+    noise_scale) -- independent of fold_factors: this scales the *device's*
+    noise model, fold_factors scales noise via *circuit* folding. Two
+    different knobs, kept distinctly named on purpose.
+
+    Returns {step_count: {fold_factor: {"bitstrings": [...], "bitstrings_x": [...] (if
+    requested)}}}, matching submit_quench_batch's per-step_count shape (one
+    level up) so callers can reuse shot_observables.py's
+    bitstrings_to_observables/bitstrings_to_mx/bootstrap_* functions
+    unchanged at each (step_count, fold_factor) point.
+    """
+    color_edges = build_chain_color_edges(N)
+    project = get_project(project_name)
+    job_name = job_name or f"tfim-zne-N{N}-h{h_field:.2f}"
+
+    jobs = [(steps, fold, basis) for steps in step_counts for fold in fold_factors for basis in bases]
+    circuits = []
+    for steps, fold, basis in jobs:
+        ansatz = build_quench_ansatz_circuit(N, color_edges, steps, dt, h_field, J, mirror=mirror,
+                                              initial_state_label=initial_state_label)
+        folded = Folding.circuit(ansatz, fold)[0]
+        append_basis_measurement(folded, N, basis)
+        circuits.append(folded)
+
+    circuit_refs = [
+        qnx.circuits.upload(
+            circuit=circ, name=f"{job_name}-steps{steps}-fold{fold}-{basis}", project=project,
+            description=(f"ZNE-folded TFIM quench: N={N}, h/J={h_field / J:.2f}, "
+                          f"dt={dt}, steps={steps}, fold={fold}, basis={basis}"),
+        )
+        for (steps, fold, basis), circ in zip(jobs, circuits)
+    ]
+
+    config_kwargs = {}
+    if noise_scale is not None:
+        config_kwargs["error_params"] = UserErrorParams(scale=noise_scale)
+    backend_config = qnx.QuantinuumConfig(device_name=device_name, **config_kwargs)
+
+    compiled_refs = qnx.compile(
+        programs=circuit_refs, backend_config=backend_config,
+        name=f"{job_name}-compile", project=project,
+    )
+
+    results = qnx.execute(
+        programs=list(compiled_refs), n_shots=[n_shots] * len(compiled_refs),
+        backend_config=backend_config, name=job_name, project=project, timeout=timeout,
+    )
+
+    bitstrings_by = {}
+    for (steps, fold, basis), result in zip(jobs, results):
+        bitstrings_by[(steps, fold, basis)] = [
+            "".join(str(bit) for bit in shot) for shot in result.get_shots()
+        ]
+
+    out = {}
+    for steps in step_counts:
+        out[steps] = {}
+        for fold in fold_factors:
+            entry = {}
+            if "z" in bases:
+                entry["bitstrings"] = bitstrings_by[(steps, fold, "z")]
+            if "x" in bases:
+                entry["bitstrings_x"] = bitstrings_by[(steps, fold, "x")]
+            out[steps][fold] = entry
     return out
 
 

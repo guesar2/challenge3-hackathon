@@ -71,7 +71,7 @@ def _append_trotter_layers(circuit, N, color_edges, layer_angles, mirror):
         circuit.Rx(pending_x, i)
 
 
-def _append_basis_measurement(circuit, N, basis):
+def append_basis_measurement(circuit, N, basis):
     """Rotate into `basis` ("z" or "x") and measure every qubit.
 
     Hardware/emulator shots always come back as computational-basis (Z)
@@ -96,7 +96,7 @@ def build_quench_circuit(N, color_edges, steps, dt, h_field, J, mirror=True,
     keeps the generated gate sequence consistent with the Qiskit version.
     initial_state_label: optional bitstring (e.g. "0110") prepared via X
     gates before the Trotter layers; defaults to |0...0>.
-    basis: "z" (default) or "x" -- see _append_basis_measurement.
+    basis: "z" (default) or "x" -- see append_basis_measurement.
     """
     theta_x = -2 * h_field * dt
     theta_zz = -2 * J * dt
@@ -112,7 +112,36 @@ def build_quench_circuit(N, color_edges, steps, dt, h_field, J, mirror=True,
 
     _append_trotter_layers(circuit, N, color_edges, [(x_angle, zz_angle)] * steps, mirror)
 
-    _append_basis_measurement(circuit, N, basis)
+    append_basis_measurement(circuit, N, basis)
+    return circuit
+
+
+def build_quench_ansatz_circuit(N, color_edges, steps, dt, h_field, J, mirror=True,
+                                 initial_state_label=None):
+    """Same as build_quench_circuit (identical state prep and Trotter layers)
+    but UNMEASURED -- no classical bits, no append_basis_measurement call.
+
+    For zero-noise extrapolation (see qnexus_backend.submit_zne_batch):
+    qermit's Folding.circuit folds a circuit by inverting its gates
+    (gate.op.dagger), which only works on unitary operations -- a
+    measurement gate isn't invertible, so folding must happen on this
+    unmeasured ansatz, with the basis measurement appended afterward to
+    each already-folded copy.
+    """
+    theta_x = -2 * h_field * dt
+    theta_zz = -2 * J * dt
+    x_angle = (theta_x / 2 if mirror else theta_x) / math.pi
+    zz_angle = theta_zz / math.pi
+
+    circuit = Circuit(N)
+
+    if initial_state_label:
+        for i, bit in enumerate(initial_state_label):
+            if bit == '1':
+                circuit.X(i)
+
+    _append_trotter_layers(circuit, N, color_edges, [(x_angle, zz_angle)] * steps, mirror)
+
     return circuit
 
 
@@ -185,7 +214,7 @@ def build_adiabatic_circuit(N, color_edges, ramp_steps, dt, h_target, J, h_init,
     across the ramp rather than staying fixed. Boundary Rx fusion (see
     _append_trotter_layers) still applies even though the angle changes
     step to step -- Rx(a)*Rx(b) = Rx(a+b) regardless of whether a == b.
-    basis: "z" (default) or "x" -- see _append_basis_measurement.
+    basis: "z" (default) or "x" -- see append_basis_measurement.
     """
     circuit = Circuit(N, N)
 
@@ -206,5 +235,5 @@ def build_adiabatic_circuit(N, color_edges, ramp_steps, dt, h_target, J, h_init,
 
     _append_trotter_layers(circuit, N, color_edges, layer_angles, mirror)
 
-    _append_basis_measurement(circuit, N, basis)
+    append_basis_measurement(circuit, N, basis)
     return circuit
