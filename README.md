@@ -68,13 +68,14 @@ quantathon-challenge3/
 │   │                                      actualmente en True en config.py, ver nota más abajo)
 │   ├── run_zne.py / zne_fit.py        ← Sección 8/11 — Zero-Noise Extrapolation contra el H2-Emulator real
 │   │                                     (qermit Folding.circuit); mismo gate que la sección 7, cuota adicional
-│   ├── run_iceberg_qec.py             ← Sección 9/11 — corrida piloto Iceberg vs. H2-Emulator real
+│   ├── run_iceberg_qec.py             ← Sección 9/10 — corrida piloto Iceberg vs. H2-Emulator real
 │   │                                     (gateado por config.ICEBERG_RUN_ON_H2_EMULATOR, False por defecto —
 │   │                                      no-op sin cuota a menos que se active)
-│   ├── run_noise_scaling.py           ← Sección 10/11 — caracterización del ruido real de H2-Emulator vs. N
-│   │                                     (hasta 26 qubits) y profundidad — sección de mayor costo de cuota
-│   ├── plot_iceberg_comparison.py     ← Sección 11/11 — regenera la comparación Iceberg vs. ED/ZNE desde
+│   ├── plot_iceberg_comparison.py     ← Sección 10/10 — regenera la comparación Iceberg vs. ED/ZNE desde
 │   │                                     datos ya guardados por las secciones 9 y 8, sin cuota
+│   ├── run_noise_scaling.py           ← NO forma parte de main.py — caracterización del ruido real de
+│   │                                     H2-Emulator vs. N (hasta 26 qubits) y profundidad — sección de
+│   │                                     mayor costo de cuota del proyecto; se ejecuta aparte
 │   ├── iceberg_code.py, iceberg_circuits.py,
 │   │   iceberg_tfim_circuit.py, iceberg_decode.py
 │   │                                  ← Código de detección de errores Iceberg [[k+2,k,2]] (arXiv:2211.06703):
@@ -189,9 +190,15 @@ Este script orquesta el pipeline TFIM (`src/ftim_main.py`, once secciones) y lue
 7. `run_h2_emulator.py` — el mismo circuito de quench, construido en pytket, enviado al emulador Quantinuum H2 vía `qnexus` — gateado por `config.RUN_ON_H2_EMULATOR`, **actualmente `True`** (ver nota de cuota arriba: esta sección consume cuota real en cada corrida a menos que se ponga en `False`)
 8. `run_zne.py` — Zero-Noise Extrapolation contra el H2-Emulator real (qermit `Folding.circuit` + `src/zne_fit.py`) — gateado por el mismo `config.RUN_ON_H2_EMULATOR`; consume cuota real adicional en cada corrida
 9. `run_iceberg_qec.py` — corrida piloto del código de detección de errores Iceberg [[k+2,k,2]] (`src/iceberg_*.py`) contra el H2-Emulator real — gateado por `config.ICEBERG_RUN_ON_H2_EMULATOR`, **`False` por defecto** (no-op sin cuota a menos que se active)
-10. `run_noise_scaling.py` — caracteriza cómo escala el modelo de ruido real de H2-Emulator con N (hasta 26 qubits) y con profundidad de circuito — gateado por `config.RUN_ON_H2_EMULATOR`; **la sección de mayor costo de cuota del pipeline** (dos corridas H2 por cada N)
-11. `plot_iceberg_comparison.py` — regenera la comparación Iceberg vs. ED/ZNE a partir de los datos guardados por la sección 9 (`data/iceberg_qec_latest.json`) y la sección 8 (`data/h2_zne_latest.json`) — sin cuota; sin datos de la sección 9 (p. ej. con `ICEBERG_RUN_ON_H2_EMULATOR = False`, el valor por defecto) simplemente imprime que no encontró nada y no genera figura, sin fallar
-12. `fh2d_src/fh_main.py` — extensión opcional Fermi-Hubbard 2D (paquete separado, sin código compartido con `src/`) — ver más abajo; su propio `fh2d_src/fh_config.py` también tiene `RUN_ON_H2_EMULATOR = True` por defecto, así que también consume cuota real
+10. `plot_iceberg_comparison.py` — regenera la comparación Iceberg vs. ED/ZNE a partir de los datos guardados por la sección 9 (`data/iceberg_qec_latest.json`) y la sección 8 (`data/h2_zne_latest.json`) — sin cuota; sin datos de la sección 9 (p. ej. con `ICEBERG_RUN_ON_H2_EMULATOR = False`, el valor por defecto) simplemente imprime que no encontró nada y no genera figura, sin fallar
+11. `fh2d_src/fh_main.py` — extensión opcional Fermi-Hubbard 2D (paquete separado, sin código compartido con `src/`) — ver más abajo; su propio `fh2d_src/fh_config.py` también tiene `RUN_ON_H2_EMULATOR = True` por defecto, así que también consume cuota real
+
+> **Nota:** `run_noise_scaling.py` (caracterización de ruido real vs. N, hasta 26
+> qubits, y vs. profundidad de circuito) **no** forma parte de esta secuencia
+> automática — es la sección de mayor costo de cuota de todo el proyecto (dos
+> corridas H2 por cada N) y se dejó fuera de `main.py` deliberadamente para no
+> disparar el costo/duración del pipeline completo. Ejecútala aparte con
+> `python src/run_noise_scaling.py` si quieres esa caracterización.
 
 ### Ejecución de una sola sección
 
@@ -207,8 +214,9 @@ python src/run_quantum_advantage.py  # puramente clásico, sin cuota
 python src/run_h2_emulator.py        # consume cuota real (config.RUN_ON_H2_EMULATOR = True por defecto)
 python src/run_zne.py                # consume cuota real (mismo gate que run_h2_emulator.py)
 python src/run_iceberg_qec.py        # no-op salvo config.ICEBERG_RUN_ON_H2_EMULATOR = True — consume cuota si se activa
-python src/run_noise_scaling.py      # consume cuota real — la corrida más cara del pipeline (N hasta 26)
 python src/plot_iceberg_comparison.py # sin cuota — requiere datos previos de run_iceberg_qec.py y run_zne.py
+python src/run_noise_scaling.py      # NO se ejecuta desde main.py (ver nota arriba) — consume cuota real,
+                                      # la corrida más cara de todo el proyecto (N hasta 26)
 ```
 
 ### Funciones adicionales del emulador H2 (fuera de `main.py`)
@@ -464,4 +472,4 @@ MIT License — ver [LICENSE](LICENSE) para detalles.
 
 ---
 
-> **Nota para jueces:** Todo el código es reproducible desde un entorno limpio usando `requirements.txt`. El script `main.py` en la raíz del repositorio es el único punto de entrada necesario para regenerar todas las figuras y cifras reportadas de las once secciones del pipeline TFIM (ED, adiabático, quench, convergencia dt, escaneo N, costo clásico-vs-cuántico, emulador H2, ZNE, piloto Iceberg QEC, escaneo de ruido, comparación Iceberg) y de la extensión Fermi-Hubbard 2D (`fh2d_src/`). Las secciones 7, 8 y 10 (emulador H2, ZNE y escaneo de ruido) requieren `config.RUN_ON_H2_EMULATOR = True` y una sesión de `qnexus`, ya que consumen cuota de uso medida — **actualmente activado por defecto**, y la sección 10 en particular es la de mayor costo (dos corridas H2 por cada N hasta 26 qubits). La sección 9 (Iceberg QEC) tiene su propio interruptor separado, `config.ICEBERG_RUN_ON_H2_EMULATOR`, **desactivado por defecto**. El barrido adiabático en hardware (`--phase-transition`) y el VQE (`--vqe`) de `run_h2_emulator.py` son entradas adicionales que se invocan aparte de `main.py` por costo extra de cuota (ver "Funciones adicionales del emulador H2" arriba). La extensión Fermi-Hubbard 2D también tiene su propio interruptor de cuota, `fh2d_src/fh_config.py`'s `RUN_ON_H2_EMULATOR` (activado por defecto, igual que el de `src/config.py`) — su corrida de emulador H2 (incluyendo VQE) consume cuota real de `qnexus` cuando `python main.py` la ejecuta.
+> **Nota para jueces:** Todo el código es reproducible desde un entorno limpio usando `requirements.txt`. El script `main.py` en la raíz del repositorio es el único punto de entrada necesario para regenerar todas las figuras y cifras reportadas de las diez secciones del pipeline TFIM que corre automáticamente (ED, adiabático, quench, convergencia dt, escaneo N, costo clásico-vs-cuántico, emulador H2, ZNE, piloto Iceberg QEC, comparación Iceberg) y de la extensión Fermi-Hubbard 2D (`fh2d_src/`). Las secciones 7 y 8 (emulador H2 y ZNE) requieren `config.RUN_ON_H2_EMULATOR = True` y una sesión de `qnexus`, ya que consumen cuota de uso medida — **actualmente activado por defecto**. La sección 9 (Iceberg QEC) tiene su propio interruptor separado, `config.ICEBERG_RUN_ON_H2_EMULATOR`, **desactivado por defecto**. `run_noise_scaling.py` (caracterización de ruido vs. N hasta 26 qubits) queda deliberadamente fuera de `main.py` — es la sección de mayor costo de cuota de todo el proyecto — y se ejecuta aparte con `python src/run_noise_scaling.py` (ver nota en "Uso" arriba). El barrido adiabático en hardware (`--phase-transition`) y el VQE (`--vqe`) de `run_h2_emulator.py` son entradas adicionales que se invocan aparte de `main.py` por costo extra de cuota (ver "Funciones adicionales del emulador H2" arriba). La extensión Fermi-Hubbard 2D también tiene su propio interruptor de cuota, `fh2d_src/fh_config.py`'s `RUN_ON_H2_EMULATOR` (activado por defecto, igual que el de `src/config.py`) — su corrida de emulador H2 (incluyendo VQE) consume cuota real de `qnexus` cuando `python main.py` la ejecuta.
