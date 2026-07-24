@@ -1,44 +1,13 @@
 """
 fh_tables.py
 
-The summary tables: one table per U value, each holding <N>, <D> and m_stag with
-ED as the reference and the deviations of the other two engines rowed underneath.
+Summary tables: one table per U value, each holding <N>, <D> and m_stag.
 
-WHAT IS BEING COMPARED, AND WHY IT NEEDS TWO REFERENCE ROWS
------------------------------------------------------------
-ED, Trotter and VQE do not all compute the same object, so a single reference
-row would be physically meaningless:
-
-  * VQE     produces a variational approximation to the GROUND STATE.
-  * Trotter produces an approximation to the time-evolved QUENCH state.
-  * ED      can produce both, exactly.
-
-So each table carries two exact ED rows -- the ground state and the quench state
-at the final time -- and each approximate engine is compared against the one it
-is actually approximating. Mixing them (e.g. comparing a VQE ground state to an
-ED quench state) would produce a number with no meaning.
-
-TWO HONEST CAVEATS THAT THE TABLES MAKE VISIBLE
------------------------------------------------
-1. m_stag vanishes IDENTICALLY in the ground state of any finite cluster. The
-   Hubbard Hamiltonian is SU(2) symmetric and a finite system cannot
-   spontaneously break that symmetry, so <S^z_i> = 0 site by site. A non-zero
-   m_stag in the ground-state block would be a bug, not antiferromagnetism. The
-   VQE row does show a non-zero value, because its ansatz starts from a Neel
-   reference and never restores the symmetry -- that is a real, reportable
-   limitation of the ansatz, not of the code. To measure antiferromagnetic order
-   in a finite ground state properly you need the staggered structure factor
-   S(pi,pi) = (1/N) sum_ij (-1)^(i-j) <S^z_i S^z_j>, which does not vanish.
-   The quench block is where m_stag IS meaningful: the initial Neel product
-   state breaks the symmetry by hand, and we watch that order decay.
-
-2. At U=0 the half-filled ground state can be an OPEN SHELL. On 2x2 the
-   single-particle levels are -2t, 0, 0, +2t, so half filling leaves the zero
-   mode partly filled and the ground state is 4-fold degenerate. <D> and m_stag
-   are then properties of a degenerate MANIFOLD, not of one vector, so the ED
-   row reports the (basis-independent) ensemble average and the table flags the
-   degeneracy. A variational method will land on one particular member of the
-   manifold, so a non-zero deviation there is expected and is not an error.
+Each table carries two exact ED reference rows -- the ground state and the
+quench state at the final time -- because the approximate engines do not
+compute the same object: VQE approximates the GROUND state, Trotter
+approximates the time-evolved QUENCH state. Each engine is therefore rowed
+underneath the ED reference it is actually approximating.
 """
 from __future__ import annotations
 
@@ -156,34 +125,9 @@ def format_table(row, lat, t, dt, steps, order, init):
     lines.append(f" ground-state energy:  ED = {row['ed_energy']:+.6f}   "
                  f"VQE = {row['vqe_energy']:+.6f}   "
                  f"({row['vqe_energy_error_percent']:.2f} %)")
-
-    notes = []
-    if row["degeneracy"] > 1:
-        notes.append(f"ED ground state is {row['degeneracy']}-fold degenerate at "
-                     f"this U; ED values are the ensemble average over that "
-                     f"manifold, so the VQE deviation is not a pure accuracy "
-                     f"measure.")
-    notes.append("m_stag = 0 in the exact ground state is required by SU(2) "
-                 "symmetry on a finite cluster, not a numerical accident; the "
-                 "VQE row is non-zero because its Neel-referenced ansatz does "
-                 "not restore that symmetry.")
-    for n in notes:
-        for i, chunk in enumerate(_wrap(n, len(head) - 4)):
-            lines.append(("  note: " if i == 0 else "        ") + chunk)
+    lines.append(f" ED ground-state degeneracy: {row['degeneracy']}")
     lines.append("")
     return "\n".join(lines)
-
-
-def _wrap(text, width):
-    words, out, cur = text.split(), [], ""
-    for wd in words:
-        if len(cur) + len(wd) + 1 > width:
-            out.append(cur); cur = wd
-        else:
-            cur = (cur + " " + wd).strip()
-    if cur:
-        out.append(cur)
-    return out
 
 
 def run(U_values=None, save=True, verbose=True):

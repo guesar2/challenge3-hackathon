@@ -270,7 +270,7 @@ def ground_state_sector(lat: HubbardLattice, t: float, U: float,
                                      "sz_per_site")},
     }
     if verbose:
-        note = "" if g == 1 else f"  [GS is {g}-fold degenerate: ensemble average]"
+        note = "" if g == 1 else f"  [GS degeneracy {g}]"
         print(f"  {lat.Lx}x{lat.Ly}  U/t={U/t:>4.1f}: "
               f"E={e0:+.6f} (E/N={e0/lat.n_sites:+.6f}), "
               f"<N>={result['total_particles']:.3f}, "
@@ -338,6 +338,8 @@ def ed_time_evolution_sector(lat: HubbardLattice, t: float, U: float, dt: float,
     times = np.arange(1, steps + 1) * dt
     dbl = np.zeros(steps); mstag = np.zeros(steps)
     dens = np.zeros((lat.n_sites, steps))
+    szs = np.zeros((lat.n_sites, steps))
+    dbls = np.zeros((lat.n_sites, steps))
 
     matvec = lambda v: H @ v
     for k in range(steps):
@@ -347,12 +349,17 @@ def ed_time_evolution_sector(lat: HubbardLattice, t: float, U: float, dt: float,
         dbl[k] = o["avg_double_occupancy"]
         mstag[k] = o["staggered_magnetization"]
         dens[:, k] = o["density_array"]
+        for si, site in enumerate(lat.sites):
+            szs[si, k] = o["sz_per_site"][site]
+            dbls[si, k] = o["double_per_site"][site]
 
     return {
         "times": times,
         "avg_double_occupancy": dbl,
         "staggered_magnetization": mstag,
         "density_per_site": dens,
+        "sz_per_site": szs,
+        "double_per_site": dbls,
         "sites": lat.sites,
     }
 

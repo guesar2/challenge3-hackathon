@@ -28,7 +28,6 @@ def run(lattices=None, save=True, plot=True):
         rows.append(row)
         print(f"  {Lx}x{Ly}: {lat.n_sites} sites, {lat.n_qubits} qubits | "
               f"E/N(U=1)={row['epn_weak']:+.4f}  E/N(U=8)={row['epn_strong']:+.4f}")
-    print("  note: 4x4 = 16 sites = 32 qubits > 26-qubit H2 exact emulator (out of reach here)")
 
     if save:
         persistence.save_stage_results("n_scaling", {"rows": rows})

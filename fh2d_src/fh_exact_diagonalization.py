@@ -90,6 +90,8 @@ def ed_time_evolution(lat: HubbardLattice, t: float, U: float, dt: float, steps:
     dbl = np.zeros(steps)
     mstag = np.zeros(steps)
     dens = np.zeros((lat.n_sites, steps))
+    szs = np.zeros((lat.n_sites, steps))
+    dbls = np.zeros((lat.n_sites, steps))
 
     # Precompute the propagator action per fixed dt with expm_multiply.
     A = -1j * dt * H
@@ -99,14 +101,20 @@ def ed_time_evolution(lat: HubbardLattice, t: float, U: float, dt: float, steps:
         dbl[k] = obs.avg_double_occupancy(psi)
         mstag[k] = obs.staggered_magnetization(psi)
         d = obs.density_per_site(psi)
+        z = obs.sz_per_site(psi)
+        dd = obs.double_occupancy_per_site(psi)
         for si, s in enumerate(lat.sites):
             dens[si, k] = d[s]
+            szs[si, k] = z[s]
+            dbls[si, k] = dd[s]
 
     return {
         "times": times,
         "avg_double_occupancy": dbl,
         "staggered_magnetization": mstag,
         "density_per_site": dens,
+        "sz_per_site": szs,
+        "double_per_site": dbls,
         "sites": lat.sites,
     }
 

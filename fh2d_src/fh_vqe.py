@@ -156,8 +156,8 @@ def run_vqe_local(lat: HubbardLattice, t, U, layers=2, maxiter=1500, restarts=8,
 
 if __name__ == "__main__":
     lat = HubbardLattice(2, 2)
-    print("Weak coupling (VQE works well):")
+    print("U/t = 1:")
     run_vqe_local(lat, 1.0, 1.0, layers=2, restarts=4)
     run_vqe_local(lat, 1.0, 1.0, layers=3, restarts=4)
-    print("Strong coupling (documented HVA limitation):")
+    print("U/t = 8:")
     run_vqe_local(lat, 1.0, 8.0, layers=3, restarts=4)
