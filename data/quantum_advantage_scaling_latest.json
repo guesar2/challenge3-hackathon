@@ -1,0 +1,76 @@
+{
+  "stage": "quantum_advantage_scaling",
+  "saved_at": "2026-07-23T05:11:21.972232+00:00",
+  "results": {
+    "ed_timings": [
+      {
+        "N": 6,
+        "dim": 64,
+        "time_s": 0.022662530000161496
+      },
+      {
+        "N": 8,
+        "dim": 256,
+        "time_s": 0.04070352000007915
+      },
+      {
+        "N": 10,
+        "dim": 1024,
+        "time_s": 0.06150979999983974
+      },
+      {
+        "N": 12,
+        "dim": 4096,
+        "time_s": 0.11102124000035474
+      }
+    ],
+    "circuit_costs": [
+      {
+        "N": 4,
+        "depth": 4,
+        "gate_count": 12
+      },
+      {
+        "N": 6,
+        "depth": 4,
+        "gate_count": 18
+      },
+      {
+        "N": 8,
+        "depth": 4,
+        "gate_count": 24
+      },
+      {
+        "N": 10,
+        "depth": 4,
+        "gate_count": 30
+      },
+      {
+        "N": 12,
+        "depth": 5,
+        "gate_count": 36
+      },
+      {
+        "N": 14,
+        "depth": 5,
+        "gate_count": 42
+      },
+      {
+        "N": 16,
+        "depth": 5,
+        "gate_count": 48
+      },
+      {
+        "N": 18,
+        "depth": 5,
+        "gate_count": 54
+      },
+      {
+        "N": 20,
+        "depth": 5,
+        "gate_count": 60
+      }
+    ],
+    "extrapolate_to": 20
+  }
+}

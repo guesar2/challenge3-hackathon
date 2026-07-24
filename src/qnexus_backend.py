@@ -86,7 +86,7 @@ def start_quench_batch(N, h_field, J, dt, step_counts, n_shots, device_name="H2-
     model to scale.
 
     Costs against the qnexus usage quota once collect_quench_batch fetches
-    results -- call only with explicit approval, same as submit_quench_batch.
+    results.
 
     Returns an opaque dict that collect_quench_batch consumes; don't rely
     on its shape beyond passing it straight through.
@@ -221,7 +221,7 @@ def submit_quench_batch(N, h_field, J, dt, step_counts, n_shots, device_name="H2
     circuits into one execute() call is the emulator-compatible way to cut
     down on queue-wait.)
 
-    Costs against the qnexus usage quota -- call only with explicit approval.
+    Costs against the qnexus usage quota.
 
     Each entry is measured in both the Z and X basis (two circuits per
     step count -- TFIM's <Z> and <X> magnetization both matter for the
@@ -385,7 +385,7 @@ def submit_adiabatic_batch(N, h_targets, J, ramp_steps_by_target, dt_by_target, 
     returns the basis it was measured in), still folded into the same
     single compile/execute batch across the whole sweep.
 
-    Costs against the qnexus usage quota -- call only with explicit approval.
+    Costs against the qnexus usage quota.
 
     Returns {h_target: result_dict}, where each result_dict contains:
       - 'bitstrings':  Z-basis measurement shots

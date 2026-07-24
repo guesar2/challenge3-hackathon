@@ -1,12 +1,15 @@
 """
 plot_iceberg_comparison.py
 
-Plots the most recently persisted Iceberg-encoded qnexus pilot sweep
-(data/iceberg_qec_sweep_latest.json, written by run_iceberg_qec.py-style
-runs) against this repo's existing ED/raw-noisy/ZNE-mitigated comparison
-(data/h2_zne_latest.json, from run_zne.py) at the matching h/J -- see
-plotting.plot_iceberg_comparison's docstring for why these two datasets
-line up point-for-point (same N, same dt, same h/J).
+Plots the most recently persisted Iceberg-encoded qnexus pilot run
+(data/iceberg_qec_latest.json, written by run_iceberg_qec.py's
+run_iceberg_noisy()) against this repo's existing ED/raw-noisy/ZNE-mitigated
+comparison (data/h2_zne_latest.json, from run_zne.py) at the matching h/J --
+see plotting.plot_iceberg_comparison's docstring for why these two datasets
+line up point-for-point (same N, same dt, same h/J). Currently a single
+pilot point rather than a real depth sweep (run_iceberg_noisy() runs one
+step count at a time) -- plots as a one-point overlay either way; a real
+sweep would append more points to the same "points" list.
 
 Reads only what's already on disk -- doesn't touch qnexus, costs no
 quota, and can be re-run any number of times (e.g. to restyle the
@@ -18,10 +21,10 @@ from plotting import plot_iceberg_comparison, plot_iceberg_discard_rate
 
 
 def run():
-    iceberg = load_latest("iceberg_qec_sweep")
+    iceberg = load_latest("iceberg_qec")
     zne = load_latest("h2_zne")
     if iceberg is None:
-        print("No persisted Iceberg sweep found. Run run_iceberg_qec.py "
+        print("No persisted Iceberg run found. Run run_iceberg_qec.py "
               "(with config.ICEBERG_RUN_ON_H2_EMULATOR = True) first.")
         return None
     if zne is None:

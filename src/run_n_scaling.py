@@ -315,8 +315,8 @@ def run():
         print("  section was originally a placeholder for.")
     else:
         print(f"  {iceberg_data['status']}")
-        print("  Set config.ICEBERG_RUN_ON_H2_EMULATOR = True (with explicit approval to")
-        print("  spend quota) to run the real comparison -- see run_iceberg_qec.py.")
+        print("  Set config.ICEBERG_RUN_ON_H2_EMULATOR = True to run the real")
+        print("  comparison (costs qnexus quota) -- see run_iceberg_qec.py.")
 
     print("\nSummary:")
     print("  - Circuit depth/gate count grow only mildly with N (local TFIM chain,")

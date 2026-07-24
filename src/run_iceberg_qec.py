@@ -18,7 +18,7 @@ from circuits import build_chain_color_edges
 from iceberg_tfim_circuit import build_iceberg_quench_circuit
 from iceberg_decode import decode_shots
 from persistence import save_stage_results
-from shot_observables import bitstrings_to_observables
+from shot_observables import bitstrings_to_observables, bootstrap_observable_errors
 
 
 def compile_check(k=None, device_name=None, steps=None, early_exit=None, syndrome_every=1):
@@ -117,19 +117,30 @@ def run_iceberg_noisy(k=None, device_name=None, shots=None, steps=None, early_ex
     kept, discard_rate = decode_shots(raw_shots, k)
 
     result = {
-        "k": k, "device": device_name, "shots": shots, "steps": steps,
-        "early_exit": early_exit, "discard_rate": discard_rate,
+        "k": k, "h_field": config.ICEBERG_H, "device": device_name, "shots": shots,
+        "steps": steps, "early_exit": early_exit, "discard_rate": discard_rate,
         "n_kept": len(kept), "status": "Completed",
     }
     if kept:
         z_rms, mzz = bitstrings_to_observables(kept, k)
+        z_err, mzz_err = bootstrap_observable_errors(kept, k)
         result["z_rms"] = z_rms
         result["mzz"] = mzz
+        # One point in plot_iceberg_comparison's/plot_iceberg_discard_rate's
+        # expected shape (src/plotting.py) -- a real sweep would append one
+        # of these per step count instead of a single-element list.
+        result["points"] = [{
+            "t": steps * config.ICEBERG_DT, "z": z_rms, "z_err": z_err,
+            "mzz": mzz, "mzz_err": mzz_err, "discard_rate": discard_rate,
+            "n_kept": len(kept), "n_shots": shots,
+        }]
         print(f"  Discard rate: {discard_rate:.1%} ({len(kept)}/{shots} kept)")
-        print(f"  <Z>_rms = {z_rms:.4f}, <Zi Zi+1> = {mzz:.4f}")
+        print(f"  <Z>_rms = {z_rms:.4f} +/- {z_err:.4f}, "
+              f"<Zi Zi+1> = {mzz:.4f} +/- {mzz_err:.4f}")
     else:
         result["z_rms"] = None
         result["mzz"] = None
+        result["points"] = []
         print("  Discard rate: 100% -- no shots survived post-selection.")
 
     save_stage_results("iceberg_qec", result)
