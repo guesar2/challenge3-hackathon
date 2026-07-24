@@ -105,6 +105,23 @@ def build_iceberg_quench_circuit(k, color_edges, steps, dt, h_field, J,
     (or fewer steps) is likely necessary for any circuit deep enough to
     have a usable discard rate on real noisy hardware.
 
+    syndrome_every=None selects a separate, sparser mode: exactly one
+    mid-circuit round, placed right after Trotter step `steps // 2`
+    (0-indexed) finishes both its half-steps, plus the always-present
+    final round -- 2 rounds total regardless of `steps`. This isn't
+    reachable via any periodic syndrome_every value (a period can't land
+    on a single centered checkpoint without also firing elsewhere), so
+    it's handled as its own placement rule rather than a large period.
+    Cuts round count/depth far more aggressively than any integer
+    syndrome_every, at real cost: the single fault-detection guarantee
+    (see docs/ICEBERG_QEC_PLAN.md and the fault-tolerance note this
+    module's tests rely on) only covers one fault between checks -- with
+    two ~steps/2-step-wide windows, two independent faults landing in the
+    same window can cancel each other's stabilizer signature and produce
+    an undetected logical error, not just a missed discard. Also forfeits
+    most of early_exit's runtime benefit, since discard status is mostly
+    unknown until partway through the circuit at best.
+
     initial_state_label: optional bitstring (e.g. "0110") preparing a
     computational basis state instead of |0...0> -- applied as logical
     Xbar_i pi-rotations right after initialisation, before any Trotter
@@ -140,8 +157,8 @@ def build_iceberg_quench_circuit(k, color_edges, steps, dt, h_field, J,
         stay at their reset value of 0 and must not be misread as "no
         error" on their own).
     """
-    if syndrome_every < 1:
-        raise ValueError(f"syndrome_every must be >= 1, got {syndrome_every}")
+    if syndrome_every is not None and syndrome_every < 1:
+        raise ValueError(f"syndrome_every must be >= 1 or None, got {syndrome_every}")
 
     n = validate_k(k)
     theta_x = -2 * h_field * dt
@@ -162,7 +179,11 @@ def build_iceberg_quench_circuit(k, color_edges, steps, dt, h_field, J,
                 compile_logical_rx(circuit, k, i, math.pi)
 
     n_half_steps = 2 * steps
-    n_mid_rounds = n_half_steps // syndrome_every
+    mid_step_index = steps // 2  # only used when syndrome_every is None
+    if syndrome_every is None:
+        n_mid_rounds = 1 if steps > 0 else 0
+    else:
+        n_mid_rounds = n_half_steps // syndrome_every
     n_rounds_total = n_mid_rounds + 1  # always end with one final round
     flags_cregs = [circuit.add_c_register(f"flags_r{r}", 2) for r in range(n_rounds_total)]
     round_counter = [0]
@@ -194,10 +215,10 @@ def build_iceberg_quench_circuit(k, color_edges, steps, dt, h_field, J,
 
     def after_half_step():
         half_step_counter[0] += 1
-        if half_step_counter[0] % syndrome_every == 0:
+        if syndrome_every is not None and half_step_counter[0] % syndrome_every == 0:
             append_syndrome_round()
 
-    for _ in range(steps):
+    for step_idx in range(steps):
         # RZZ half-step -- stays parallel across color classes, same
         # physical pairs as the unencoded circuit (Eq. 6).
         cond = current_condition()
@@ -212,6 +233,9 @@ def build_iceberg_quench_circuit(k, color_edges, steps, dt, h_field, J,
         for i in range(k):
             compile_logical_rx(circuit, k, i, theta_x, condition=cond)
         after_half_step()
+
+        if syndrome_every is None and step_idx == mid_step_index:
+            append_syndrome_round()
 
     # Final syndrome round (Fig. 1(e): extract S_X -- and, redundantly but
     # harmlessly, S_Z again -- before the destructive measurement, since

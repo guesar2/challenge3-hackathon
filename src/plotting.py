@@ -539,26 +539,41 @@ def plot_zne_comparison(h_values, zne_data, save_dir=None, n=None,
     return fig
 
 
-def plot_iceberg_comparison(h, zne_data_for_h, iceberg_points, save_dir=None, n=None,
+# Fixed per-series marker/color assignment for overlaid Iceberg techniques
+# (e.g. different syndrome_every schedules) -- assigned by list order, never
+# cycled/re-picked when the series count changes, so a given technique keeps
+# its identity across figures.
+ICEBERG_SERIES_STYLES = [
+    dict(marker='s', color='tab:blue'),
+    dict(marker='D', color='tab:orange'),
+    dict(marker='^', color='tab:purple'),
+    dict(marker='v', color='tab:brown'),
+]
+
+
+def plot_iceberg_comparison(h, zne_data_for_h, iceberg_series, save_dir=None, n=None,
                              filename="h2_iceberg_comparison.png"):
     """<Z> and <Zi Zi+1> vs. time, extending plot_zne_comparison's ED/raw-
     noisy/ZNE-mitigated comparison (same colors/markers, so the two figures
-    read as a matched pair) with a sparse overlay of Iceberg-corrected
-    pilot points -- one blue square per (time, discard-rate) run, each with
-    its own bootstrap error bar, rather than a dense curve (the underlying
-    pilot only covers a handful of step counts, not every step ED/raw/ZNE
-    have).
+    read as a matched pair) with a sparse overlay of one or more
+    Iceberg-corrected techniques -- one marker style per technique (see
+    ICEBERG_SERIES_STYLES), each with its own bootstrap error bars, rather
+    than a dense curve (the underlying pilot only covers a handful of step
+    counts, not every step ED/raw/ZNE have).
 
     zne_data_for_h: same shape as one h-entry of plot_zne_comparison's
     zne_data (dict with times, z_ed, z_raw, z_raw_err, z_zne, z_zne_err,
     mzz_ed, mzz_raw, mzz_raw_err, mzz_zne, mzz_zne_err) -- reuse
     data/h2_zne_latest.json's results[str(h)] directly.
 
-    iceberg_points: list of dicts, one per Iceberg pilot run, each with
-    't', 'z', 'z_err', 'mzz', 'mzz_err', 'discard_rate', 'n_kept',
-    'n_shots' -- as produced by iceberg_decode.decode_shots +
+    iceberg_series: list of {"label": str, "points": [...]} dicts, one per
+    Iceberg run/technique to overlay (e.g. different syndrome_every
+    schedules) -- each gets its own marker/color, in list order, and its
+    own legend entry. `points` is a list of dicts with 't', 'z', 'z_err',
+    'mzz', 'mzz_err' (as produced by iceberg_decode.decode_shots +
     shot_observables.bitstrings_to_observables/bootstrap_observable_errors
-    (see run_iceberg_qec.py).
+    -- see run_iceberg_qec.py / run_iceberg_sweep.py). A single technique
+    still works: pass a one-element list.
     """
     columns = (
         ('z', r'$\langle Z \rangle$ (RMS per site)'),
@@ -567,8 +582,6 @@ def plot_iceberg_comparison(h, zne_data_for_h, iceberg_points, save_dir=None, n=
     r = zne_data_for_h
     fig, axes = plt.subplots(1, len(columns), figsize=(6 * len(columns) + 2, 4), squeeze=False)
 
-    iceberg_times = [p['t'] for p in iceberg_points]
-
     for col_idx, (key, ylabel) in enumerate(columns):
         ax = axes[0][col_idx]
         ax.plot(r['times'], r[f'{key}_ed'], 'r-', linewidth=2, label='ED (exact)')
@@ -576,10 +589,14 @@ def plot_iceberg_comparison(h, zne_data_for_h, iceberg_points, save_dir=None, n=
                     capsize=4, label='H2-Emulator (raw noisy)')
         ax.errorbar(r['times'], r[f'{key}_zne'], yerr=r[f'{key}_zne_err'], fmt='go', markersize=6,
                     capsize=4, label='ZNE-mitigated')
-        iceberg_vals = [p[key] for p in iceberg_points]
-        iceberg_errs = [p[f'{key}_err'] for p in iceberg_points]
-        ax.errorbar(iceberg_times, iceberg_vals, yerr=iceberg_errs, fmt='bs', markersize=8,
-                    capsize=4, label='Iceberg-corrected')
+        for series_idx, series in enumerate(iceberg_series):
+            style = ICEBERG_SERIES_STYLES[series_idx % len(ICEBERG_SERIES_STYLES)]
+            pts = series["points"]
+            times = [p['t'] for p in pts]
+            vals = [p[key] for p in pts]
+            errs = [p[f'{key}_err'] for p in pts]
+            ax.errorbar(times, vals, yerr=errs, marker=style['marker'], color=style['color'],
+                        linestyle='none', markersize=8, capsize=4, label=series['label'])
         ax.set_xlabel('Time t')
         ax.set_ylabel(ylabel)
         ax.set_title(f'h/J = {h:.1f}' + (f', N={n}' if n is not None else ''))
@@ -593,28 +610,39 @@ def plot_iceberg_comparison(h, zne_data_for_h, iceberg_points, save_dir=None, n=
     return fig
 
 
-def plot_iceberg_discard_rate(iceberg_points, save_dir=None, n=None,
+def plot_iceberg_discard_rate(iceberg_series, save_dir=None, n=None,
                                filename="h2_iceberg_discard_rate.png"):
-    """Discard rate (%) vs. time for a series of Iceberg pilot runs at
+    """Discard rate (%) vs. time for one or more Iceberg techniques at
     increasing circuit depth -- the "price to pay" companion to
     plot_iceberg_comparison, mirroring the paper's own Fig. 2c/3b
     (arXiv:2211.06703): more Trotter steps means more syndrome-measurement
     rounds and more chances to flag a real error, so discard rate climbs
-    monotonically with depth on real noisy hardware.
-    """
-    times = [p['t'] for p in iceberg_points]
-    rates = [p['discard_rate'] * 100 for p in iceberg_points]
+    with depth on real noisy hardware -- and a sparser syndrome schedule
+    (fewer rounds, less extraction-circuitry overhead) directly trades off
+    against that climb, which is exactly what overlaying multiple
+    `iceberg_series` here is for.
 
+    iceberg_series: same shape as plot_iceberg_comparison's -- list of
+    {"label": str, "points": [...]} dicts, each point a dict with 't',
+    'discard_rate', 'n_kept', 'n_shots'.
+    """
     fig, ax = plt.subplots(figsize=(6, 4))
-    ax.plot(times, rates, 'go-', markersize=8)
-    for t, rate, p in zip(times, rates, iceberg_points):
-        ax.annotate(f"{p['n_kept']}/{p['n_shots']}", (t, rate), textcoords="offset points",
-                    xytext=(0, 8), ha='center', fontsize=7, color='dimgray')
+    for series_idx, series in enumerate(iceberg_series):
+        style = ICEBERG_SERIES_STYLES[series_idx % len(ICEBERG_SERIES_STYLES)]
+        pts = series["points"]
+        times = [p['t'] for p in pts]
+        rates = [p['discard_rate'] * 100 for p in pts]
+        ax.plot(times, rates, marker=style['marker'], color=style['color'],
+                markersize=8, label=series['label'])
+        for t, rate, p in zip(times, rates, pts):
+            ax.annotate(f"{p['n_kept']}/{p['n_shots']}", (t, rate), textcoords="offset points",
+                        xytext=(0, 8), ha='center', fontsize=7, color='dimgray')
     ax.set_xlabel('Time t')
     ax.set_ylabel('Discard rate (%)')
     ax.set_title('Iceberg discard rate vs. circuit depth' + (f', N={n}' if n is not None else ''))
     ax.set_ylim(0, 100)
     ax.grid(True, alpha=0.3)
+    ax.legend(loc='best', fontsize=8)
 
     _finalize(fig, filename, save_dir)
     return fig

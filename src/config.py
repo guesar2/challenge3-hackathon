@@ -118,6 +118,26 @@ ICEBERG_SHOTS = 200
 ICEBERG_EARLY_EXIT = True           # native condition= gating skips remaining two-qubit gates
                                      # once a shot is already flagged for discard; False -> plain
                                      # post-selection-only circuit (useful as an A/B comparison)
+ICEBERG_SYNDROME_EVERY = 1          # see iceberg_tfim_circuit.py's build_iceberg_quench_circuit
+                                     # docstring for the full tradeoff; 1 checks every half-step
+                                     # (paper author's own guidance); None checks only once, at
+                                     # the middle Trotter step, plus the always-present final round
+
+# Multi-point Iceberg depth sweep (run_iceberg_sweep.py), used in place of a
+# single pilot point in the automatic pipeline (ftim_main.py). k/h_field/dt
+# deliberately differ from ICEBERG_K/H/DT above -- N=8, h/J=0.5 is this
+# repo's existing ED/raw-noisy/ZNE reference point (data/h2_zne_latest.json
+# only has an h=0.5 entry), which plot_iceberg_comparison.py needs to overlay
+# against; ICEBERG_K/H above are the separate small-pilot/compile-check
+# defaults and are left alone.
+ICEBERG_SWEEP_K = 8
+ICEBERG_SWEEP_H = 0.5
+ICEBERG_SWEEP_DT = 0.1
+ICEBERG_SWEEP_STEP_SHOT_PAIRS = ((5, 200), (10, 200))  # shallow to start, same
+                                     # philosophy as ICEBERG_STEPS -- raise
+                                     # (e.g. toward the (8,15,20,25,30) range
+                                     # this was validated at) only after a
+                                     # successful run at this modest schedule
 
 # Quantinuum H2 emulator run (pytket circuit submitted via qnexus).
 # Requires a live qnexus login and costs against a metered usage quota.
