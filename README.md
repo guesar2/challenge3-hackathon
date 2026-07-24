@@ -8,7 +8,8 @@
 > **ODS:** 7 · 9 · 12 · 13 | **Dificultad:** Avanzado | **Plataforma:** Quantinuum H2 Emulator
 
 ---
-
+# Reporte Técnico
+El reporte técnico se puede consultar en **[docs/reporte.pdf](docs/reporte.pdf)**.
 ## Descripción del proyecto
 
 Este repositorio contiene la implementación completa de la simulación del **Modelo de Ising de Campo Transverso (TFIM)** en 1D mediante evolución temporal trotterizada, con comparación sistemática contra diagonalización exacta (ED). El objetivo es detectar la transición de fase cuántica en `h/J = 1` y evaluar la fidelidad de la simulación cuántica frente a métodos clásicos.
