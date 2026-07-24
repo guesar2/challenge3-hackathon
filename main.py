@@ -32,23 +32,23 @@ Runs, in sequence (each is also independently runnable, see src/run_*.py):
                                      H2 submissions per N)
     11. plot_iceberg_comparison.py -- regenerates the Iceberg-vs-ED/ZNE comparison
                                      figure from step 9's saved data (no quota)
-    12. fh2d/fh2d/fh_main.py      -- optional 2D Fermi-Hubbard extension, its own
+    12. fh2d/fh_main.py           -- optional 2D Fermi-Hubbard extension, its own
                                      self-contained package (same qnexus-quota
-                                     caveat -- see fh2d/fh2d/fh_config.py)
+                                     caveat -- see fh2d/fh_config.py)
 
 To check a single section without running the rest, e.g.:
     cd src && python run_ed.py
-    cd fh2d/fh2d && python fh_main.py
+    cd fh2d && python fh_main.py
 """
 import os
 import sys
 
 _ROOT = os.path.dirname(os.path.abspath(__file__))
-# src/ and fh2d/fh2d/ both import their own modules by bare name (e.g.
-# "zne_fit" exists in both); put fh2d/fh2d/ first so its modules resolve
+# src/ and fh2d/ both import their own modules by bare name (e.g.
+# "zne_fit" exists in both); put fh2d/ first so its modules resolve
 # from there first if a name is ever imported from both packages.
 sys.path.insert(0, os.path.join(_ROOT, "src"))
-sys.path.insert(0, os.path.join(_ROOT, "fh2d", "fh2d"))
+sys.path.insert(0, os.path.join(_ROOT, "fh2d"))
 
 import ftim_main
 import fh_main
