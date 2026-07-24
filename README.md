@@ -41,15 +41,33 @@ quantathon-challenge3/
 │                                          (fh_main.main()) en secuencia
 │
 ├── src/
-│   ├── ftim_main.py                   ← Orquestador: ejecuta las 6 secciones TFIM (run_*.py) en secuencia
-│   ├── run_ed.py                      ← Sección 1/6 — línea base ED, ejecutable de forma independiente
-│   ├── run_adiabatic.py               ← Sección 2/6 — barrido adiabático trotterizado (statevector local)
-│   ├── run_quench.py                  ← Sección 3/6 — evolución "quench" ED vs. Trotter local
-│   ├── run_dt_convergence.py          ← Sección 4/6 — barrido de dt a tiempo fijo, confirma O(Δt²)
-│   ├── run_n_scaling.py               ← Sección 5/6 — escaneo Trotter-vs-ED de ruptura, N=4..20
-│   ├── run_h2_emulator.py             ← Sección 6/6 — quench, barrido adiabático y VQE contra el emulador Quantinuum H2 vía qnexus
+│   ├── ftim_main.py                   ← Orquestador: ejecuta las 11 secciones TFIM (run_*.py) en secuencia
+│   ├── run_ed.py                      ← Sección 1/11 — línea base ED, ejecutable de forma independiente
+│   ├── run_adiabatic.py               ← Sección 2/11 — barrido adiabático trotterizado (statevector local)
+│   ├── run_quench.py                  ← Sección 3/11 — evolución "quench" ED vs. Trotter local
+│   ├── run_dt_convergence.py          ← Sección 4/11 — barrido de dt a tiempo fijo, confirma O(Δt²)
+│   ├── run_n_scaling.py               ← Sección 5/11 — escaneo Trotter-vs-ED de ruptura, N=4..20
+│   ├── run_quantum_advantage.py       ← Sección 6/11 — costo clásico (ED) vs. costo del circuito Trotter,
+│   │                                     puramente clásico, sin cuota
+│   ├── run_h2_emulator.py             ← Sección 7/11 — quench contra el emulador Quantinuum H2 vía qnexus
 │   │                                     (gateado por config.RUN_ON_H2_EMULATOR — consume cuota;
 │   │                                      actualmente en True en config.py, ver nota más abajo)
+│   ├── run_zne.py / zne_fit.py        ← Sección 8/11 — Zero-Noise Extrapolation contra el H2-Emulator real
+│   │                                     (qermit Folding.circuit); mismo gate que la sección 7, cuota adicional
+│   ├── run_iceberg_qec.py             ← Sección 9/11 — corrida piloto Iceberg vs. H2-Emulator real
+│   │                                     (gateado por config.ICEBERG_RUN_ON_H2_EMULATOR, False por defecto —
+│   │                                      no-op sin cuota a menos que se active)
+│   ├── run_noise_scaling.py           ← Sección 10/11 — caracterización del ruido real de H2-Emulator vs. N
+│   │                                     (hasta 26 qubits) y profundidad — sección de mayor costo de cuota
+│   ├── plot_iceberg_comparison.py     ← Sección 11/11 — regenera la comparación Iceberg vs. ED/ZNE desde
+│   │                                     datos ya guardados por la sección 9, sin cuota (ver nota de
+│   │                                     desajuste de nombres de stage en "Uso" más abajo)
+│   ├── iceberg_code.py, iceberg_circuits.py,
+│   │   iceberg_tfim_circuit.py, iceberg_decode.py
+│   │                                  ← Código de detección de errores Iceberg [[k+2,k,2]] (arXiv:2211.06703):
+│   │                                     álgebra de estabilizadores, circuitos pytket, codificación del circuito
+│   │                                     de quench TFIM, y decodificación clásica de los shots (usado por las
+│   │                                     secciones 9 y 11 de arriba)
 │   ├── config.py                      ← Parámetros de simulación (N, J, H_VALUES, dt, H2_*, H2_ADIABATIC_*, H2_VQE_*, etc.)
 │   ├── pauli_ops.py                   ← Operadores de Pauli + construcción del Hamiltoniano TFIM
 │   ├── exact_diagonalization.py       ← Línea base ED (estado fundamental y evolución exacta)
@@ -68,17 +86,6 @@ quantathon-challenge3/
 │   ├── plot_h2_comparison.py          ← Script auxiliar para regenerar gráficos H2 vs. ED a partir de datos ya guardados en data/
 │   ├── reporting.py                   ← Tabla comparativa Trotter vs. ED en consola
 │   ├── persistence.py                 ← Guardado/carga de resultados por etapa en data/ (JSON con timestamp + puntero *_latest.json)
-│   ├── run_zne.py / zne_fit.py        ← Análisis adicional: Zero-Noise Extrapolation contra el H2-Emulator real (no corre desde main.py)
-│   ├── run_noise_scaling.py           ← Análisis adicional: caracterización del ruido real de H2-Emulator vs. N y profundidad (no corre desde main.py)
-│   ├── run_quantum_advantage.py       ← Análisis adicional: costo clásico (ED) vs. costo del circuito Trotter, sin cuota (no corre desde main.py)
-│   ├── iceberg_code.py, iceberg_circuits.py,
-│   │   iceberg_tfim_circuit.py, iceberg_decode.py
-│   │                                  ← Código de detección de errores Iceberg [[k+2,k,2]] (arXiv:2211.06703):
-│   │                                     álgebra de estabilizadores, circuitos pytket, codificación del circuito
-│   │                                     de quench TFIM, y decodificación clásica de los shots
-│   ├── run_iceberg_qec.py             ← Análisis adicional: corrida piloto Iceberg vs. H2-Emulator real
-│   │                                     (gateado por config.ICEBERG_RUN_ON_H2_EMULATOR, False por defecto; no corre desde main.py)
-│   ├── plot_iceberg_comparison.py     ← Regenera la comparación Iceberg vs. ED/ZNE desde datos ya guardados, sin cuota
 │   └── fermi_hubbard.py               ← Modelo Fermi-Hubbard 2D (JW, disperso) — implementación previa, no
 │                                          importada por ningún otro módulo de src/; superada por el paquete
 │                                          completo fh2d/ (no confundir uno con el otro)
@@ -152,40 +159,38 @@ source venv/bin/activate
 python main.py                  # desde la raíz del repo — reproduce todas las figuras/cifras
 ```
 
-Este script orquesta el pipeline TFIM (`src/ftim_main.py`, seis secciones) y luego la extensión Fermi-Hubbard 2D (`fh2d/fh2d/fh_main.py`) en secuencia:
+Este script orquesta el pipeline TFIM (`src/ftim_main.py`, once secciones) y luego la extensión Fermi-Hubbard 2D (`fh2d/fh2d/fh_main.py`) en secuencia:
 1. `run_ed.py` — `ed_baseline`: observables del estado fundamental (ED) para `config.H_VALUES`
 2. `run_adiabatic.py` — `run_adiabatic_simulation`: barrido adiabático trotterizado (statevector local, Qiskit) desde `config.H_INIT` hasta cada `h` objetivo, comparado contra ED
 3. `run_quench.py` — evolución "quench" desde el estado producto `|0...0⟩`, comparando `ed_time_evolution_exact` vs. `run_trotter_fixed_hamiltonian` (objetivo: <5% de desviación en ⟨Z⟩ y ⟨ZᵢZᵢ₊₁⟩)
 4. `run_dt_convergence.py` — barrido de `dt` a tiempo total fijo, confirma la convergencia O(Δt²) del Trotter de segundo orden (`figures/dt_convergence.png`)
 5. `run_n_scaling.py` — escaneo Trotter-vs-ED de ruptura, N=4..20 (`figures/n_scaling.png`)
-6. `run_h2_emulator.py` — el mismo circuito de quench, construido en pytket, enviado al emulador Quantinuum H2 vía `qnexus` — gateado por `config.RUN_ON_H2_EMULATOR`, **actualmente `True`** (ver nota de cuota arriba: esta sección consume cuota real en cada corrida a menos que se ponga en `False`)
-7. `fh2d/fh2d/fh_main.py` — extensión opcional Fermi-Hubbard 2D (paquete separado, sin código compartido con `src/`) — ver más abajo; su propio `fh2d/fh2d/fh_config.py` también tiene `RUN_ON_H2_EMULATOR = True` por defecto, así que también consume cuota real
+6. `run_quantum_advantage.py` — costo clásico medido (ED) vs. costo del circuito Trotter (puertas/profundidad vs. N) — puramente clásico, sin cuota (`figures/quantum_advantage_scaling.png`)
+7. `run_h2_emulator.py` — el mismo circuito de quench, construido en pytket, enviado al emulador Quantinuum H2 vía `qnexus` — gateado por `config.RUN_ON_H2_EMULATOR`, **actualmente `True`** (ver nota de cuota arriba: esta sección consume cuota real en cada corrida a menos que se ponga en `False`)
+8. `run_zne.py` — Zero-Noise Extrapolation contra el H2-Emulator real (qermit `Folding.circuit` + `src/zne_fit.py`) — gateado por el mismo `config.RUN_ON_H2_EMULATOR`; consume cuota real adicional en cada corrida
+9. `run_iceberg_qec.py` — corrida piloto del código de detección de errores Iceberg [[k+2,k,2]] (`src/iceberg_*.py`) contra el H2-Emulator real — gateado por `config.ICEBERG_RUN_ON_H2_EMULATOR`, **`False` por defecto** (no-op sin cuota a menos que se active)
+10. `run_noise_scaling.py` — caracteriza cómo escala el modelo de ruido real de H2-Emulator con N (hasta 26 qubits) y con profundidad de circuito — gateado por `config.RUN_ON_H2_EMULATOR`; **la sección de mayor costo de cuota del pipeline** (dos corridas H2 por cada N)
+11. `plot_iceberg_comparison.py` — regenera la comparación Iceberg vs. ED/ZNE a partir de los datos guardados por la sección 9 — sin cuota (⚠️ ver nota más abajo: actualmente no encuentra datos por un desajuste de nombres entre `run_iceberg_qec.py` y este script)
+12. `fh2d/fh2d/fh_main.py` — extensión opcional Fermi-Hubbard 2D (paquete separado, sin código compartido con `src/`) — ver más abajo; su propio `fh2d/fh2d/fh_config.py` también tiene `RUN_ON_H2_EMULATOR = True` por defecto, así que también consume cuota real
+
+> ⚠️ **Desajuste de nombres conocido:** `run_iceberg_qec.py` guarda sus resultados como `data/iceberg_qec_latest.json`, pero `plot_iceberg_comparison.py` busca `data/iceberg_qec_sweep_latest.json` — nombres distintos, así que el segundo nunca encuentra los datos del primero incluso después de una corrida real. `python main.py` sigue corriendo limpio (la sección 11 simplemente imprime "no encontrado" y no genera figura), pero el gráfico Iceberg-vs-ED/ZNE no se regenera hasta corregir el nombre de stage en uno de los dos scripts.
 
 ### Ejecución de una sola sección
 
 Cada sección es independiente — calcula su propia línea base ED y no depende de que las demás se hayan ejecutado antes — así que se puede verificar una sin correr el resto:
 
 ```bash
-python src/run_ed.py             # solo línea base ED (rápido, puramente clásico)
-python src/run_adiabatic.py      # solo el barrido adiabático
-python src/run_quench.py         # solo la evolución "quench"
-python src/run_dt_convergence.py # solo el barrido de convergencia dt
-python src/run_n_scaling.py      # solo el escaneo Trotter-vs-ED, N=4..20
-python src/run_h2_emulator.py    # consume cuota real (config.RUN_ON_H2_EMULATOR = True por defecto)
-```
-
-### Análisis adicionales (no incluidos en `main.py`)
-
-Estos scripts son análisis más profundos, independientes del pipeline por
-defecto — cada uno se ejecuta a mano cuando se lo necesita, no como parte
-de `python main.py`:
-
-```bash
-python src/run_zne.py                # Zero-Noise Extrapolation contra el H2-Emulator real (qermit Folding.circuit + src/zne_fit.py) — consume cuota
-python src/run_noise_scaling.py      # Caracteriza cómo escala el modelo de ruido real de H2-Emulator con N y con profundidad de circuito — consume cuota
-python src/run_quantum_advantage.py  # Compara el costo clásico medido (ED) contra el costo del circuito Trotter (puertas/profundidad vs. N) — puramente clásico, sin cuota
-python src/run_iceberg_qec.py        # Corrida piloto del código de detección de errores Iceberg [[k+2,k,2]] (src/iceberg_*.py) contra el H2-Emulator real — gateado por config.ICEBERG_RUN_ON_H2_EMULATOR (False por defecto) — consume cuota si se activa
-python src/plot_iceberg_comparison.py # Regenera la comparación Iceberg vs. ED/ZNE a partir de datos ya guardados — sin cuota
+python src/run_ed.py                 # solo línea base ED (rápido, puramente clásico)
+python src/run_adiabatic.py          # solo el barrido adiabático
+python src/run_quench.py             # solo la evolución "quench"
+python src/run_dt_convergence.py     # solo el barrido de convergencia dt
+python src/run_n_scaling.py          # solo el escaneo Trotter-vs-ED, N=4..20
+python src/run_quantum_advantage.py  # puramente clásico, sin cuota
+python src/run_h2_emulator.py        # consume cuota real (config.RUN_ON_H2_EMULATOR = True por defecto)
+python src/run_zne.py                # consume cuota real (mismo gate que run_h2_emulator.py)
+python src/run_iceberg_qec.py        # no-op salvo config.ICEBERG_RUN_ON_H2_EMULATOR = True — consume cuota si se activa
+python src/run_noise_scaling.py      # consume cuota real — la corrida más cara del pipeline (N hasta 26)
+python src/plot_iceberg_comparison.py # sin cuota — ver nota de desajuste de nombres arriba
 ```
 
 ### Funciones adicionales del emulador H2 (fuera de `main.py`)
@@ -441,4 +446,4 @@ MIT License — ver [LICENSE](LICENSE) para detalles.
 
 ---
 
-> **Nota para jueces:** Todo el código es reproducible desde un entorno limpio usando `requirements.txt`. El script `main.py` en la raíz del repositorio es el único punto de entrada necesario para regenerar todas las figuras y cifras reportadas de las secciones 1–3 (más el quench de la sección 4) y de la extensión Fermi-Hubbard 2D (`fh2d/`). La sección 4 completa — emulador Quantinuum H2: quench, barrido adiabático y VQE — requiere `config.RUN_ON_H2_EMULATOR = True` y una sesión de `qnexus`, ya que consume cuota de uso medida; el barrido adiabático (`--phase-transition`) y el VQE (`--vqe`) se invocan aparte de `main.py` por costo adicional de cuota (ver "Funciones adicionales del emulador H2" arriba). La extensión Fermi-Hubbard 2D también tiene su propio interruptor de cuota, `fh2d/fh2d/fh_config.py`'s `RUN_ON_H2_EMULATOR` (activado por defecto, igual que el de `src/config.py`) — su corrida de emulador H2 consume cuota real de `qnexus` cuando `python main.py` la ejecuta.
+> **Nota para jueces:** Todo el código es reproducible desde un entorno limpio usando `requirements.txt`. El script `main.py` en la raíz del repositorio es el único punto de entrada necesario para regenerar todas las figuras y cifras reportadas de las once secciones del pipeline TFIM (ED, adiabático, quench, convergencia dt, escaneo N, costo clásico-vs-cuántico, emulador H2, ZNE, piloto Iceberg QEC, escaneo de ruido, comparación Iceberg) y de la extensión Fermi-Hubbard 2D (`fh2d/`). Las secciones 7, 8 y 10 (emulador H2, ZNE y escaneo de ruido) requieren `config.RUN_ON_H2_EMULATOR = True` y una sesión de `qnexus`, ya que consumen cuota de uso medida — **actualmente activado por defecto**, y la sección 10 en particular es la de mayor costo (dos corridas H2 por cada N hasta 26 qubits). La sección 9 (Iceberg QEC) tiene su propio interruptor separado, `config.ICEBERG_RUN_ON_H2_EMULATOR`, **desactivado por defecto**. El barrido adiabático en hardware (`--phase-transition`) y el VQE (`--vqe`) de `run_h2_emulator.py` son entradas adicionales que se invocan aparte de `main.py` por costo extra de cuota (ver "Funciones adicionales del emulador H2" arriba). La extensión Fermi-Hubbard 2D también tiene su propio interruptor de cuota, `fh2d/fh2d/fh_config.py`'s `RUN_ON_H2_EMULATOR` (activado por defecto, igual que el de `src/config.py`) — su corrida de emulador H2 (incluyendo VQE) consume cuota real de `qnexus` cuando `python main.py` la ejecuta.

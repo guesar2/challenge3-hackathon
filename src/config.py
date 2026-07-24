@@ -127,17 +127,7 @@ H2_DEVICE_NAME_NOISY = "H2-Emulator"  # H2's real noisy emulator counterpart to
                              # H2_DEVICE_NAME -- carries Quantinuum's published noise_specs
                              # (gate/SPAM/crosstalk/dephasing error rates), unlike H2-1LE's
                              # exact noiseless state-vector emulation (shot noise only -- see
-                             # qnexus_backend.py's module docstring). NOTE: "H2-1E" (the name
-                             # used in this repo's earlier docstrings/comments) is NOT a valid
-                             # qnexus device -- confirmed against the live qnexus device
-                             # catalog (qnexus.devices.get_all()), which only exposes
-                             # H1-1LE/H2-1LE (noiseless) and H1-Emulator/H2-Emulator (noisy,
-                             # with embedded noise_specs) -- real H2-1/H2-1E hardware access
-                             # isn't in this account's catalog at all. Despite the
-                             # "local_emulator" system_type label, H2-Emulator still runs
-                             # Nexus-side (nexus_hosted=True), reached the same way as
-                             # H2_DEVICE_NAME via qnx.execute() -- gated by RUN_ON_H2_EMULATOR,
-                             # costs the same qnexus quota.
+                             # qnexus_backend.py's module docstring). 
 H2_PROJECT_NAME = "ftim-hackathon"
 H2_N = 4                     # small chain -- keep circuit width/cost modest
 H2_H_VALUES = (0.5, 1.0, 2.0)         # single point at criticality by default
