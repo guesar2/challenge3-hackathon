@@ -1,0 +1,29 @@
+{
+  "stage": "n_scaling",
+  "timestamp": 1784764010.031017,
+  "results": {
+    "rows": [
+      {
+        "lattice": "2x2",
+        "n_sites": 4,
+        "n_qubits": 8,
+        "epn_weak": -0.8352119043120886,
+        "epn_strong": -0.3300587395679804
+      },
+      {
+        "lattice": "2x3",
+        "n_sites": 6,
+        "n_qubits": 12,
+        "epn_weak": -1.0469778443896385,
+        "epn_strong": -0.36296559208172674
+      },
+      {
+        "lattice": "2x4",
+        "n_sites": 8,
+        "n_qubits": 16,
+        "epn_weak": -1.0791000173933338,
+        "epn_strong": -0.37824035071132656
+      }
+    ]
+  }
+}

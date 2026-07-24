@@ -1,27 +1,34 @@
 #!/usr/bin/env python3
 """
 Quantathon CR 2026 · Challenge 3
-Single entry point that reproduces every reported figure and number.
+Single entry point that reproduces every reported figure and number from the report.
 
     python main.py
 
-Runs, in sequence (each is also independently runnable, see src/run_*.py):
-    1. run_ed.py          -- exact diagonalization (ED) baseline
-    2. run_adiabatic.py   -- adiabatic Trotter sweep (local statevector)
-    3. run_quench.py      -- fixed-Hamiltonian quench (ED vs. local Trotter)
-    4. run_h2_emulator.py -- Quantinuum H2 emulator run (qnexus/pytket;
-                              off by default, see config.RUN_ON_H2_EMULATOR
-                              -- costs against a metered usage quota)
-
-To check a single section without running the rest, e.g.:
-    cd src && python run_ed.py
+Runs, in sequence the whole pipeline
 """
 import os
 import sys
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "src"))
+# Get the absolute path of the directory containing this script
+base_dir = os.path.dirname(os.path.abspath(__file__))
 
-from ftim_main import main
+# Add both source directories to sys.path so their internal module imports resolve correctly
+sys.path.insert(0, os.path.join(base_dir, "src"))
+sys.path.insert(0, os.path.join(base_dir, "fh2d_src"))
+
+# Now we can safely import the entry points
+import ftim_main as ft
+import fh_main as fh
 
 if __name__ == "__main__":
-    main()
+    
+    # 1. Execute the TFIM pipeline (from src/ftim_main.py)
+    ft.main()
+    
+    print("\n" + "=" * 60)
+    print("TRANSITIONING TO FERMI-HUBBARD PIPELINE")
+    print("=" * 60 + "\n")
+
+    # 2. Execute the Fermi-Hubbard pipeline (from fh2d_src/fh_main.py)
+    fh.fh_main()
