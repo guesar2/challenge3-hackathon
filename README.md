@@ -75,11 +75,11 @@ quantathon-challenge3/
 │   ├── 03_phase_transition.ipynb        ← Barrido h/J y transición de fase
 │   └── 04_optional_fermi_hubbard.ipynb ← Extensión Fermi-Hubbard 2D
 │
-├── tests/
-│   ├── test_hamiltonian.py            ← Vacío — pendiente (ver Tests)
-│   └── test_trotter.py               ← Vacío — pendiente (ver Tests)
-│
 ├── figures/                           ← Figuras generadas al ejecutar `python main.py` desde la raíz
+│
+├── fh2d/                               ← Extensión opcional independiente: Fermi-Hubbard 2D
+│   └── fh2d/fh_main.py                ← Punto de entrada propio de esta extensión (no forma parte
+│                                          de `python main.py`; ver "Extensión opcional" más abajo)
 │
 └── docs/
     ├── TECHNICAL_REPORT.md            ← Borrador del informe técnico (máx. 8 pp.)
@@ -359,19 +359,24 @@ hardware ya devolvió.
 
 ---
 
-## Tests
+## Extensión opcional independiente: Fermi-Hubbard 2D (`fh2d/`)
+
+`fh2d/` es un paquete separado y autocontenido — no comparte código con
+`src/` ni se ejecuta desde `main.py` — que implementa el modelo de
+Fermi-Hubbard 2D (codificación Jordan-Wigner, ED, dinámica de Trotter, VQE)
+como demostración adicional más allá del TFIM 1D requerido. Tiene su propio
+punto de entrada:
 
 ```bash
-pytest tests/ -v
+cd fh2d/fh2d
+python fh_main.py               # pipeline completo de la extensión
+python fh_main.py --quick       # salta VQE y las tablas resumen
 ```
 
-> **Estado actual:** `tests/test_hamiltonian.py` y `tests/test_trotter.py`
-> están vacíos (0 bytes), por lo que `pytest tests/` recolecta 0 tests. Los
-> tests descritos abajo son los que faltan implementar:
-- Hermiticidad del Hamiltoniano TFIM
-- Conservación de la norma en evolución trotterizada
-- Convergencia de Trotter al reducir Δt
-- Coincidencia ED vs. Qiskit statevector para N = 4
+Ver el docstring de `fh_main.py` para el resto de las banderas
+(`--no-vqe`, `--no-shots`, `--no-noise`, `--no-heatmap`). Este script es
+independiente del `main.py` de la raíz, que sigue siendo el único punto de
+entrada para el pipeline principal (TFIM 1D).
 
 ---
 

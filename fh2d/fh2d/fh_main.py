@@ -1,8 +1,9 @@
 """
-fh_main.py  --  single entry point for the 2D Fermi-Hubbard deliverable.
+fh_main.py  --  entry point for the optional 2D Fermi-Hubbard extension.
 
-Runs the whole pipeline from a clean environment and reproduces every figure and
-headline number:
+This is a separate, self-contained package (independent of the repo's main
+`main.py` / TFIM 1D pipeline). Runs the whole Fermi-Hubbard pipeline from a
+clean environment and reproduces every figure and headline number:
 
   0. self-checks        (JW consistency, free-fermion cross-check,
                          sector engine vs full-space engine)
@@ -14,10 +15,6 @@ headline number:
   5. H2 emulator run    -> fig8_h2_run.png                (free local sampler by default)
   6. VQE (optional)     -> fig6_vqe.png
   7. summary tables     -> figures_fh/summary_tables.txt  (one per U)
-
-Removed relative to earlier versions: the N-scaling / qubit-budget figure, the
-ED-vs-emulator bar chart, the VQE bar panel, all first-order-Trotter curves, and
-the circuit/angle-convention checks.
 
 Usage:
     python fh_main.py               # everything

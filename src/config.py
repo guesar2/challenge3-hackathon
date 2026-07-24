@@ -3,18 +3,11 @@ config.py
 
 Centralized simulation parameters.
 
-MERGE NOTE: the two source versions of this project each used
-`N_SCALING_VALUES` for a different purpose:
-  - the "N-scaling breakdown" version used it as the 4..20 spin range for
-    run_n_scaling.py's Trotter-vs-ED scan.
-  - the "noisy emulation" version used it as a small (6,8,10) set of sizes
-    for run_ed.py's *observable* scaling comparison plot.
-That name collision is resolved here: `N_SCALING_VALUES` keeps its
-original 4..20 meaning (run_n_scaling.py), and the ED observable-scaling
-plot instead reuses `ED_EXTRA_N_VALUES` (config.N plus these extra sizes)
-so there's a single source of truth for "which extra N's does the ED
-baseline get checked at", used by both run_ed.py's printed tables and its
-scaling plot.
+Note on naming: `N_SCALING_VALUES` is the 4..20 spin range used by
+run_n_scaling.py's Trotter-vs-ED scan. The ED baseline's own observable-
+scaling plot uses a separate name, `ED_EXTRA_N_VALUES` (config.N plus a
+few extra sizes), so both scripts have a single, unambiguous source of
+truth for which N's they check.
 """
 
 N = 6                       # number of spins in the periodic chain
@@ -25,7 +18,7 @@ H_VALUES = (0.5, 1.0, 2.0)  # target transverse fields to probe (critical point 
 # above -- both for the printed comparison tables and for the observable-
 # scaling plot (plot_ed_scaling). Doesn't affect any other stage --
 # adiabatic/quench/dt_convergence/n_scaling still run at N only.
-ED_EXTRA_N_VALUES = (8, 10)  # Si quieren más iteraciones, metanle elementos a esta tupla
+ED_EXTRA_N_VALUES = (8, 10)  # add more sizes here to extend the scaling comparison
 
 # System sizes for the ED wall-clock *runtime* scaling benchmark
 # (run_ed.py) -- separate from ED_EXTRA_N_VALUES above since this one
@@ -85,11 +78,11 @@ N_SCALING_ED_MAX = 12                        # dense ED reference only up to thi
                                               # since the real ceiling is RAM-dependent
                                               # (dense eigh on a 2^14 x 2^14 matrix already
                                               # raised MemoryError on a 4GB test machine)
-                                              # Maximum N for the noisy H2 emulation in run_n_scaling.py. Set to None to use all N_SCALING_VALUES.
-N_SCALING_NOISY_MAX = 8   # or 20, etc.
+N_SCALING_NOISY_MAX = 8   # max N for the noisy H2 emulation in run_n_scaling.py;
+                           # None uses all of N_SCALING_VALUES
 N_SCALING_H = 1.0                            # h/J probed at each N (critical point)
 N_SCALING_DT = 0.05
-N_SCALING_STEPS = 20                       #Modifiqué estos valores para el escalado, pero cambiar a gusto
+N_SCALING_STEPS = 20                       # tuned for this scan; adjust freely
 
 # Noisy-simulation section of run_n_scaling.py's table -- currently a
 # placeholder (run_noisy_stub()) until a QEC-encoded circuit exists. These
@@ -102,16 +95,14 @@ N_SCALING_STEPS = 20                       #Modifiqué estos valores para el esc
 # by itself doesn't answer the "does encoded error correction scale"
 # question that stub is a placeholder for.
 N_SCALING_NOISY_DEVICE = "H2-Emulator"
-N_SCALING_NOISY_SHOTS = 200 #Modifiqué estos valores para el escalado, pero cambiar a gusto
+N_SCALING_NOISY_SHOTS = 200 # tuned for this scan; adjust freely
 
 # Iceberg [[k+2,k,2]] error-detection code (iceberg_code.py,
 # iceberg_circuits.py, iceberg_tfim_circuit.py) -- fills in the QEC-encoded
 # circuit run_n_scaling.py's run_noisy_stub() docstring says is missing.
 # k plays N's role (must be even, like every other N/H2_* value above).
-# OFF by default and gated SEPARATELY from RUN_ON_H2_EMULATOR above --
-# this is a new capability, not covered by any prior approval to spend
-# quota; flip to True only with explicit approval, same convention as
-# RUN_ON_H2_EMULATOR.
+# OFF by default and gated SEPARATELY from RUN_ON_H2_EMULATOR above,
+# since it costs its own qnexus quota when enabled.
 ICEBERG_RUN_ON_H2_EMULATOR = False
 ICEBERG_K = 4                       # even; small to start -- see docs/ICEBERG_QEC_PLAN.md
 ICEBERG_DEVICE_NAME = "H2-Emulator"  # noisy -- the whole point is to see it catch real
@@ -129,8 +120,7 @@ ICEBERG_EARLY_EXIT = True           # native condition= gating skips remaining t
                                      # post-selection-only circuit (useful as an A/B comparison)
 
 # Quantinuum H2 emulator run (pytket circuit submitted via qnexus).
-# OFF by default: requires a live qnexus login and costs against a metered
-# usage quota. Flip to True only with explicit approval to spend quota.
+# Requires a live qnexus login and costs against a metered usage quota.
 RUN_ON_H2_EMULATOR = True
 H2_DEVICE_NAME = "H2-1LE"    # H2 noiseless-local emulator (cheapest H2-family target)
 H2_DEVICE_NAME_NOISY = "H2-Emulator"  # H2's real noisy emulator counterpart to
@@ -248,12 +238,12 @@ H2_VQE_P = 4                 # HVA layers -- ignored when H2_VQE_ANSATZ="hea"
 H2_VQE_SHOTS = 200
 H2_VQE_MAX_ITERS = 15        # COBYLA iterations -- ~15 real batch round-trips per h/J
                              # (kept small: this is what actually submits to real
-                             # H2-1LE via qnexus and costs quota). NOTE: HVA's
-                             # measured ~36-46 evaluations to self-converge means
-                             # 15 is *below* what it needs -- a real qnexus run at
-                             # this setting will still hit the iteration cap before
-                             # converging. Bump this deliberately (and accept the
-                             # added quota cost) before an actual qnexus submission.
+                             # H2-1LE via qnexus and costs quota). The HVA ansatz
+                             # measures ~36-46 evaluations to self-converge, so this
+                             # cap is below what it needs; a real qnexus run at this
+                             # setting hits the iteration cap before converging.
+                             # Raise it (at the cost of more qnexus quota) for a
+                             # fully-converged hardware VQE run.
 H2_VQE_TOL = 1e-2            # matches Quantinuum's reference tol
 H2_VQE_SEED = 10             # matches the reference snippet's random.seed(a=10)
 

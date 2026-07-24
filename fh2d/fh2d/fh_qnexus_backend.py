@@ -254,7 +254,7 @@ def submit_zne_batch(lat, t, U, dt, step_counts, fold_factors, n_shots,
                     randomness is seedable. Hardware/emulator shots are not.
 
     Costs against the qnexus usage quota (len(step_counts) * len(fold_factors)
-    circuits) -- call only with explicit approval.
+    circuits).
 
     Returns {step_count: {fold_factor: [bitstring, ...]}}.
     """
