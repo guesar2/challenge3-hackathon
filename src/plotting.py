@@ -539,6 +539,87 @@ def plot_zne_comparison(h_values, zne_data, save_dir=None, n=None,
     return fig
 
 
+def plot_iceberg_comparison(h, zne_data_for_h, iceberg_points, save_dir=None, n=None,
+                             filename="h2_iceberg_comparison.png"):
+    """<Z> and <Zi Zi+1> vs. time, extending plot_zne_comparison's ED/raw-
+    noisy/ZNE-mitigated comparison (same colors/markers, so the two figures
+    read as a matched pair) with a sparse overlay of Iceberg-corrected
+    pilot points -- one blue square per (time, discard-rate) run, each with
+    its own bootstrap error bar, rather than a dense curve (the underlying
+    pilot only covers a handful of step counts, not every step ED/raw/ZNE
+    have).
+
+    zne_data_for_h: same shape as one h-entry of plot_zne_comparison's
+    zne_data (dict with times, z_ed, z_raw, z_raw_err, z_zne, z_zne_err,
+    mzz_ed, mzz_raw, mzz_raw_err, mzz_zne, mzz_zne_err) -- reuse
+    data/h2_zne_latest.json's results[str(h)] directly.
+
+    iceberg_points: list of dicts, one per Iceberg pilot run, each with
+    't', 'z', 'z_err', 'mzz', 'mzz_err', 'discard_rate', 'n_kept',
+    'n_shots' -- as produced by iceberg_decode.decode_shots +
+    shot_observables.bitstrings_to_observables/bootstrap_observable_errors
+    (see run_iceberg_qec.py).
+    """
+    columns = (
+        ('z', r'$\langle Z \rangle$ (RMS per site)'),
+        ('mzz', r'$\langle Z_i Z_{i+1} \rangle$'),
+    )
+    r = zne_data_for_h
+    fig, axes = plt.subplots(1, len(columns), figsize=(6 * len(columns) + 2, 4), squeeze=False)
+
+    iceberg_times = [p['t'] for p in iceberg_points]
+
+    for col_idx, (key, ylabel) in enumerate(columns):
+        ax = axes[0][col_idx]
+        ax.plot(r['times'], r[f'{key}_ed'], 'r-', linewidth=2, label='ED (exact)')
+        ax.errorbar(r['times'], r[f'{key}_raw'], yerr=r[f'{key}_raw_err'], fmt='m^', markersize=6,
+                    capsize=4, label='H2-Emulator (raw noisy)')
+        ax.errorbar(r['times'], r[f'{key}_zne'], yerr=r[f'{key}_zne_err'], fmt='go', markersize=6,
+                    capsize=4, label='ZNE-mitigated')
+        iceberg_vals = [p[key] for p in iceberg_points]
+        iceberg_errs = [p[f'{key}_err'] for p in iceberg_points]
+        ax.errorbar(iceberg_times, iceberg_vals, yerr=iceberg_errs, fmt='bs', markersize=8,
+                    capsize=4, label='Iceberg-corrected')
+        ax.set_xlabel('Time t')
+        ax.set_ylabel(ylabel)
+        ax.set_title(f'h/J = {h:.1f}' + (f', N={n}' if n is not None else ''))
+        ax.grid(True, alpha=0.3)
+        ax.legend(loc='best', fontsize=8)
+
+    title = 'ED vs. raw-noisy vs. ZNE vs. Iceberg-corrected (H2-Emulator)' + (f' -- N={n}' if n is not None else '')
+    fig.suptitle(title, fontsize=11)
+
+    _finalize(fig, filename, save_dir)
+    return fig
+
+
+def plot_iceberg_discard_rate(iceberg_points, save_dir=None, n=None,
+                               filename="h2_iceberg_discard_rate.png"):
+    """Discard rate (%) vs. time for a series of Iceberg pilot runs at
+    increasing circuit depth -- the "price to pay" companion to
+    plot_iceberg_comparison, mirroring the paper's own Fig. 2c/3b
+    (arXiv:2211.06703): more Trotter steps means more syndrome-measurement
+    rounds and more chances to flag a real error, so discard rate climbs
+    monotonically with depth on real noisy hardware.
+    """
+    times = [p['t'] for p in iceberg_points]
+    rates = [p['discard_rate'] * 100 for p in iceberg_points]
+
+    fig, ax = plt.subplots(figsize=(6, 4))
+    ax.plot(times, rates, 'go-', markersize=8)
+    for t, rate, p in zip(times, rates, iceberg_points):
+        ax.annotate(f"{p['n_kept']}/{p['n_shots']}", (t, rate), textcoords="offset points",
+                    xytext=(0, 8), ha='center', fontsize=7, color='dimgray')
+    ax.set_xlabel('Time t')
+    ax.set_ylabel('Discard rate (%)')
+    ax.set_title('Iceberg discard rate vs. circuit depth' + (f', N={n}' if n is not None else ''))
+    ax.set_ylim(0, 100)
+    ax.grid(True, alpha=0.3)
+
+    _finalize(fig, filename, save_dir)
+    return fig
+
+
 def plot_h2_phase_transition(h_values, h2_data, ed_results, save_dir=None, saved_at=None,
                               method_label="adiabatic", filename="h2_phase_transition.png"):
     """<Z>, <X>, and <Zi Zi+1> vs. h/J for an H2 ground-state-search protocol
