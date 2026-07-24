@@ -13,6 +13,12 @@
 
 Este repositorio contiene la implementación completa de la simulación del **Modelo de Ising de Campo Transverso (TFIM)** en 1D mediante evolución temporal trotterizada, con comparación sistemática contra diagonalización exacta (ED). El objetivo es detectar la transición de fase cuántica en `h/J = 1` y evaluar la fidelidad de la simulación cuántica frente a métodos clásicos.
 
+Más allá del TFIM base, el proyecto incluye tres extensiones ejecutadas contra el emulador Quantinuum H2 real:
+
+- **Extensión Fermi-Hubbard 2D** — modelo adicional (redes 4×4, 4×6) con codificación fermiónica propia, paquete separado.
+- **Mitigación de errores por Zero-Noise Extrapolation (ZNE)** — extrapolación a ruido cero (qermit `Folding.circuit`) contra las corridas ruidosas reales del H2-Emulator.
+- **Código de detección de errores Iceberg `[[k+2,k,2]]`** — corrida piloto del código Iceberg (arXiv:2211.06703) aplicado sobre el H2-Emulator real, comparado contra ED/ZNE.
+
 ### Modelo principal: TFIM 1D
 
 ```
@@ -22,6 +28,14 @@ H = -J Σ⟨i,j⟩ ZᵢZⱼ  -  h Σᵢ Xᵢ
 - **J**: acoplamiento ZZ entre vecinos (ferromagnético)
 - **h**: campo magnético transverso (fluctuaciones cuánticas)
 - **Transición de fase cuántica**: `h/J = 1` (límite termodinámico)
+
+### Extensión: Zero-Noise Extrapolation (ZNE)
+
+Mitigación de errores por extrapolación a ruido cero contra el H2-Emulator real (`run_zne.py` / `zne_fit.py`), usando el *circuit folding* de qermit (`Folding.circuit`) para amplificar el ruido y extrapolar de vuelta a `fold_factor = 0`.
+
+### Extensión: Código de detección de errores Iceberg
+
+Corrida piloto del código Iceberg `[[k+2,k,2]]` (`run_iceberg_qec.py`) contra el H2-Emulator real, comparada contra ED y ZNE (`plot_iceberg_comparison.py`).
 
 ### Extensión opcional: Fermi-Hubbard 2D
 
@@ -157,6 +171,13 @@ pip install -r requirements.txt
 source venv/bin/activate
 python main.py                  # desde la raíz del repo — reproduce todas las figuras/cifras
 ```
+
+> **Duración:** con `config.RUN_ON_H2_EMULATOR = True` (valor por defecto) esta corrida completa
+> somete decenas de trabajos al H2-Emulator real (colas incluidas) y toma **varias horas**
+> de principio a fin, no minutos — no es un script rápido. `config.QNEXUS_TIMEOUT` (espera
+> del lado del cliente por envío, no del trabajo en sí) está en `3600s` para dar margen a
+> esas colas/corridas reales; súbelo aún más si tu sesión de `qnexus` ve `TimeoutError` en
+> alguna etapa puntual.
 
 Este script orquesta el pipeline TFIM (`src/ftim_main.py`, once secciones) y luego la extensión Fermi-Hubbard 2D (`fh2d_src/fh_main.py`) en secuencia:
 1. `run_ed.py` — `ed_baseline`: observables del estado fundamental (ED) para `config.H_VALUES`

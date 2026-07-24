@@ -141,10 +141,14 @@ H2_SHOTS = 200
 # qnexus_backend.py's submit_quench_batch/submit_zne_batch/collect_quench_batch
 # all default to this value (still overridable per-call via their own
 # `timeout` kwarg, e.g. run_h2_emulator.run(timeout=...) / run_zne.run(timeout=...)).
-# run_noise_scaling.py's NOISE_SCALING_TIMEOUT/DEPTH_SCALING_TIMEOUT
-# deliberately override this default further (1800s) for its larger N/step
-# sweeps, which measured taking longer than the general default below.
-QNEXUS_TIMEOUT = 300.0
+# run_noise_scaling.py's NOISE_SCALING_TIMEOUT/DEPTH_SCALING_TIMEOUT keep their
+# own independently-measured 1800s override for its N/step sweeps regardless.
+#
+# Bumped from 300s: that was too short for real H2-Emulator queue/run times
+# once submissions stack up across the full pipeline -- a full `python
+# main.py` run against the real emulator (RUN_ON_H2_EMULATOR = True) is
+# expected to take several hours end-to-end, not minutes.
+QNEXUS_TIMEOUT = 3600.0
 
 # Above this N, run_h2_emulator.run() skips the dense-ED reference curve --
 # same 2^N x 2^N dense-diagonalization wall as N_SCALING_ED_MAX above, just
