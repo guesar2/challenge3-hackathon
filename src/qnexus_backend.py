@@ -43,6 +43,7 @@ from quantinuum_schemas.models.quantinuum_systems_noise import UserErrorParams
 
 import config
 from circuits import build_chain_color_edges
+from iceberg_tfim_circuit import build_iceberg_quench_circuit
 from tket_circuit import (
     append_basis_measurement, build_adiabatic_circuit, build_quench_ansatz_circuit,
     build_quench_circuit,
@@ -547,3 +548,105 @@ class VqeSession:
             ["".join(str(bit) for bit in shot) for shot in r.get_shots()]
             for r in results
         ]
+
+
+def submit_iceberg_quench_batch(k, h_field, J, dt, step_counts, n_shots, device_name="H2-Emulator",
+                                 early_exit=True, syndrome_every=1, project_name="ftim-hackathon",
+                                 job_name=None, timeout=300.0):
+    """Iceberg-encoded counterpart to submit_quench_batch: builds,
+    uploads, compiles, and runs an Iceberg-encoded TFIM quench circuit
+    (iceberg_tfim_circuit.build_iceberg_quench_circuit) for every step
+    count in `step_counts`, against a REAL noisy device by default
+    (H2-Emulator, not H2-1LE) -- the whole point of the Iceberg code is to
+    see it catch real hardware noise; a noiseless run trivially discards
+    nothing (confirmed with local_emulator_backend-style H2-1LE testing
+    during development: discard rate was exactly 0, as expected -- see
+    docs/ICEBERG_QEC_PLAN.md).
+
+    k is this circuit's logical qubit count -- reuses whatever N value the
+    caller was already using for the unencoded circuit (k must be even,
+    same constraint as every other N/H2_* value in config.py).
+
+    timeout: raise well above the qnx.execute default (300s) for anything
+    beyond a shallow pilot -- a k=8, steps=5 circuit already took ~2.5
+    minutes just to compile server-side, and a 30-step circuit is several
+    times deeper. A timeout that expires does NOT mean the job failed or
+    wasted quota -- it keeps running server-side and must be recovered by
+    its job id (qnx.jobs.get(id=...) + qnx.jobs.wait_for/results), never
+    by resubmitting, which would duplicate the quota spend.
+
+    Costs against the qnexus usage quota -- call only with explicit
+    approval, same as submit_quench_batch. Before ever calling this,
+    confirm with a qnx.compile()-only pass (no execute, no quota cost)
+    that the circuit routes/rebases cleanly against `device_name` -- the
+    bit-list-per-register lookup below assumes compilation preserves each
+    circuit's classical registers (names, bit order) unchanged, which
+    should be checked once against a downloaded compiled circuit before
+    trusting it for a real run, not assumed. Also confirm this at the
+    actual step count intended for execution, not just a shallow pilot --
+    a compile check at steps=5 does not catch a register-width problem
+    that only appears at steps=30 (see iceberg_tfim_circuit.py's
+    docstring on the 64-bit-per-register limit that did exactly this).
+
+    Returns {step_count: {"data_bitstrings": [...], "flags_bitstrings":
+    [...], "n": n, "n_rounds": n_rounds}} -- zip data_bitstrings and
+    flags_bitstrings and feed the pairs into iceberg_decode.decode_shots.
+    flags_bitstrings are the concatenation, in round order, of every
+    per-round flags register (see build_iceberg_quench_circuit's
+    docstring on why they're kept as separate small registers rather than
+    one large one).
+    """
+    color_edges = build_chain_color_edges(k)
+    project = get_project(project_name)
+    job_name = job_name or f"iceberg-quench-k{k}-h{h_field:.2f}"
+
+    circuits = []
+    metas = []
+    for steps in step_counts:
+        circ, meta = build_iceberg_quench_circuit(
+            k, color_edges, steps, dt, h_field, J, early_exit=early_exit, syndrome_every=syndrome_every
+        )
+        circuits.append(circ)
+        metas.append(meta)
+
+    circuit_refs = [
+        qnx.circuits.upload(
+            circuit=circ,
+            name=f"{job_name}-steps{steps}",
+            project=project,
+            description=(f"Iceberg-encoded TFIM quench: k={k}, h/J={h_field / J:.2f}, "
+                          f"dt={dt}, steps={steps}, early_exit={early_exit}"),
+        )
+        for steps, circ in zip(step_counts, circuits)
+    ]
+
+    backend_config = qnx.QuantinuumConfig(device_name=device_name)
+    compiled_refs = qnx.compile(
+        programs=circuit_refs,
+        backend_config=backend_config,
+        name=f"{job_name}-compile",
+        project=project,
+    )
+
+    results = qnx.execute(
+        programs=list(compiled_refs),
+        n_shots=[n_shots] * len(compiled_refs),
+        backend_config=backend_config,
+        name=job_name,
+        project=project,
+        timeout=timeout,
+    )
+
+    out = {}
+    for steps, meta, circ, result in zip(step_counts, metas, circuits, results):
+        data_bits = list(circ.get_c_register(meta["data_creg_name"]))
+        flags_bits = [
+            bit for name in meta["flags_creg_names"] for bit in circ.get_c_register(name)
+        ]
+        out[steps] = {
+            "data_bitstrings": ["".join(str(bit) for bit in shot) for shot in result.get_shots(data_bits)],
+            "flags_bitstrings": ["".join(str(bit) for bit in shot) for shot in result.get_shots(flags_bits)],
+            "n": meta["n"],
+            "n_rounds": meta["n_rounds"],
+        }
+    return out

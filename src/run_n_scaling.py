@@ -40,19 +40,15 @@ A THIRD, separate question -- does *circuit-execution accuracy* degrade
 with N once real hardware noise (not just Trotter/dt error) is in play --
 is NOT answered by anything above, since run_trotter_fixed_hamiltonian is
 exact noiseless statevector evolution. That question needs the shot-based
-H2 execution path (tket_circuit.py + qnexus_backend.py, with
-device_name=config.H2_DEVICE_NAME_NOISY -- the default H2_DEVICE_NAME is
-noiseless except for shot noise, so it wouldn't show anything new here
-either) run at a QEC-encoded circuit, which doesn't exist in this project
-yet. This project does now have a real noisy H2 device reachable via
-qnexus (see run_h2_emulator.py's `noisy=True` path) -- so device access is
-no longer the blocker it once was -- but that alone doesn't answer this
-N-scaling question, since it still needs a QEC-encoded circuit built at
-each N, not just a noisy device to submit an unencoded circuit to. Rather
-than silently skip it, run_noisy_stub() below prints/saves a clearly-
-labeled placeholder row per N so the table has the right shape ahead of
-time -- see its docstring for exactly what to wire in once a QEC-encoded
-circuit path exists.
+H2 execution path run against BOTH an unencoded circuit (run_noisy_stub
+below, which already does this) AND a QEC-encoded one -- the Iceberg
+[[k+2,k,2]] error-detection code now exists (iceberg_code.py,
+iceberg_circuits.py, iceberg_tfim_circuit.py, run_iceberg_qec.py), gated
+by config.ICEBERG_RUN_ON_H2_EMULATOR (OFF by default, needs explicit
+approval before spending quota -- see run_iceberg_qec.run_iceberg_noisy).
+run_noisy_stub()'s unencoded run below and run_iceberg_qec's encoded run
+are the two halves of the actual "does encoded error correction help"
+comparison this section was originally a placeholder for.
 
 Standalone: `python run_n_scaling.py`. Computes its own ED baseline where
 feasible, so it can be checked in isolation like the other capstone
@@ -65,6 +61,7 @@ from qiskit.quantum_info import Statevector
 import config
 from circuits import build_chain_color_edges, build_single_layer_circuit
 from exact_diagonalization import ed_time_evolution_exact
+from run_iceberg_qec import run_iceberg_noisy
 from trotter_simulation import run_trotter_fixed_hamiltonian
 from plotting import plot_n_scaling
 from persistence import save_stage_results
@@ -290,7 +287,7 @@ def run():
         }
 
     noisy_data = run_noisy_stub(config.N_SCALING_VALUES)
-
+    iceberg_data = run_iceberg_noisy()  # gated by config.ICEBERG_RUN_ON_H2_EMULATOR (off by default)
 
     plot_n_scaling(scaling_data, ed_max_N, save_dir=config.PLOT_SAVE_DIR)
 
@@ -300,15 +297,26 @@ def run():
     _print_scaling_table(scaling_data, ed_max_N)
 
     print("\n" + "=" * 60)
-    print("SUMMARY TABLE -- NOISY SIMULATION (PLACEHOLDER, see run_noisy_stub())")
+    print("SUMMARY TABLE -- NOISY SIMULATION (unencoded, real H2-Emulator)")
     print("=" * 60)
     _print_noisy_table(noisy_data)
-    print("\nNote: the noisy section above is a placeholder. It requires a QEC-encoded")
-    print("circuit that doesn't exist in this project yet -- see run_noisy_stub()'s")
-    print("docstring in run_n_scaling.py for exactly what to wire in once it does. A")
-    print("real noisy H2 device (config.H2_DEVICE_NAME_NOISY) is available via")
-    print("run_h2_emulator.py's noisy=True path, but that alone doesn't fill this table --")
-    print("it still needs a QEC-encoded circuit built at each N, not just device access.")
+
+    print("\n" + "=" * 60)
+    print("ICEBERG-ENCODED COMPARISON (config.ICEBERG_RUN_ON_H2_EMULATOR)")
+    print("=" * 60)
+    if iceberg_data["status"] == "Completed":
+        print(f"  k={iceberg_data['k']}, steps={iceberg_data['steps']}, "
+              f"device={iceberg_data['device']}, early_exit={iceberg_data['early_exit']}")
+        print(f"  Discard rate: {iceberg_data['discard_rate']:.1%} "
+              f"({iceberg_data['n_kept']}/{iceberg_data['shots']} kept)")
+        print(f"  <Z>_rms = {iceberg_data['z_rms']}, <Zi Zi+1> = {iceberg_data['mzz']}")
+        print("  Compare against the matching unencoded row above (same N/k, same device) --")
+        print("  that's the actual 'does encoded error detection help' comparison this")
+        print("  section was originally a placeholder for.")
+    else:
+        print(f"  {iceberg_data['status']}")
+        print("  Set config.ICEBERG_RUN_ON_H2_EMULATOR = True (with explicit approval to")
+        print("  spend quota) to run the real comparison -- see run_iceberg_qec.py.")
 
     print("\nSummary:")
     print("  - Circuit depth/gate count grow only mildly with N (local TFIM chain,")
@@ -318,16 +326,17 @@ def run():
     print("    stays within the challenge's <5% tolerance (see n_scaling.png, left panel).")
     print(f"  - The dense ED *reference* is what stops scaling (N > {ed_max_N} skipped above) --")
     print("    it needs a full 2^N x 2^N matrix, unlike the local, gate-based Trotter circuit.")
-    print("  - Noisy (hardware-accuracy) scaling is not yet measured -- see the placeholder")
-    print("    table above.")
+    print("  - Noisy (hardware-accuracy) scaling, encoded vs. unencoded: see the Iceberg")
+    print("    comparison above (off by default -- needs explicit quota approval to run).")
 
     save_stage_results("n_scaling", {
         "J": J, "h": h, "dt": dt, "steps": steps,
         "N_values": list(config.N_SCALING_VALUES), "ed_max_N": ed_max_N,
         "scaling_data": scaling_data,
         "noisy_data": noisy_data,
+        "iceberg_data": iceberg_data,
     })
-    return scaling_data, noisy_data
+    return scaling_data, noisy_data, iceberg_data
 
 
 if __name__ == "__main__":
