@@ -104,15 +104,6 @@ quantathon-challenge3/
 │                                          importada por ningún otro módulo de src/; superada por el paquete
 │                                          completo fh2d_src/ (no confundir uno con el otro)
 │
-├── notebooks/
-│   ├── 01_exact_diagonalization.ipynb ← Vacío — pendiente
-│   ├── 02_trotter_simulation.ipynb    ← Vacío — pendiente
-│   ├── 03_phase_transition.ipynb      ← Vacío — pendiente
-│   ├── 04_optional_FermiHubbard.ipynb ← Extensión Fermi-Hubbard 2D (contenido real)
-│   ├── 04_optional_fermi_hubbard.ipynb ← Vacío — duplicado de nombre del anterior, pendiente de limpieza
-│   ├── TFIM_LíneaBase_SinRuido.ipynb  ← Desarrollo interactivo del TFIM sin ruido (notebook de trabajo, contenido real)
-│   └── pauli_ops.py                   ← Copia de trabajo de src/pauli_ops.py para desarrollo interactivo en notebooks
-│
 ├── figures/                           ← Figuras generadas al ejecutar `python main.py` desde la raíz
 │
 ├── fh2d_src/                           ← Extensión opcional: Fermi-Hubbard 2D (paquete propio,
