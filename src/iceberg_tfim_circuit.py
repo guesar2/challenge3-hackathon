@@ -75,12 +75,27 @@ def _append_circuit(dest, src, qubit_map, condition=None):
 
 
 def build_iceberg_quench_circuit(k, color_edges, steps, dt, h_field, J,
-                                  initial_state_label=None, early_exit=True):
+                                  initial_state_label=None, early_exit=True,
+                                  syndrome_every=1):
     """Build a fault-tolerant, Iceberg-encoded pytket Circuit implementing
     `steps` fixed-Hamiltonian Trotter layers on k logical qubits, with a
-    syndrome-measurement round after each RZZ half-step and each RX
-    half-step (2 rounds per Trotter step), then one final syndrome round
-    and a destructive Z-basis measurement of every code-register qubit.
+    mid-circuit syndrome-measurement round every `syndrome_every`
+    half-steps (a "half-step" is one RZZ layer or one RX layer -- there
+    are 2*steps of them total), plus one final syndrome round and a
+    destructive Z-basis measurement of every code-register qubit.
+
+    syndrome_every: protection/depth tradeoff knob. 1 (default) measures
+    after every half-step, matching the paper author's own guidance and
+    this module's original behavior; 2 measures once per full Trotter
+    step (after the RX half-step only); larger values measure less often,
+    trading protection (a longer window in which an undetected fault
+    could accumulate before being caught) for a shallower circuit and
+    correspondingly lower discard rate. Concretely (see the k=8, steps=30
+    estimate this was built to investigate): syndrome_every=1 there gives
+    61 total rounds and ~1700 two-qubit gates -- about 2.6x the paper's
+    own deepest real-hardware demonstration -- so a large syndrome_every
+    (or fewer steps) is likely necessary for any circuit deep enough to
+    have a usable discard rate on real noisy hardware.
 
     initial_state_label: optional bitstring (e.g. "0110") preparing a
     computational basis state instead of |0...0> -- applied as logical
@@ -99,7 +114,8 @@ def build_iceberg_quench_circuit(k, color_edges, steps, dt, h_field, J,
 
     Returns (circuit, metadata). metadata is a dict:
       - "n": k+2 (code-register size)
-      - "n_rounds": total syndrome-measurement rounds (2*steps + 1)
+      - "n_rounds": total syndrome-measurement rounds (2*steps //
+        syndrome_every, plus 1 for the always-present final round)
       - "data_creg_name": classical register holding the final n-bit
         destructive measurement
       - "flags_creg_name": classical register holding every round's (a1,
@@ -113,6 +129,9 @@ def build_iceberg_quench_circuit(k, color_edges, steps, dt, h_field, J,
         stay at their reset value of 0 and must not be misread as "no
         error" on their own).
     """
+    if syndrome_every < 1:
+        raise ValueError(f"syndrome_every must be >= 1, got {syndrome_every}")
+
     n = validate_k(k)
     theta_x = -2 * h_field * dt
     theta_zz = -2 * J * dt
@@ -131,9 +150,12 @@ def build_iceberg_quench_circuit(k, color_edges, steps, dt, h_field, J,
             if bit == '1':
                 compile_logical_rx(circuit, k, i, math.pi)
 
-    n_rounds_total = 2 * steps + 1
+    n_half_steps = 2 * steps
+    n_mid_rounds = n_half_steps // syndrome_every
+    n_rounds_total = n_mid_rounds + 1  # always end with one final round
     flags_creg = circuit.add_c_register("flags", 2 * n_rounds_total)
     round_counter = [0]
+    half_step_counter = [0]
 
     discard_creg = None
     if early_exit:
@@ -158,6 +180,11 @@ def build_iceberg_quench_circuit(k, color_edges, steps, dt, h_field, J,
             )
         round_counter[0] += 1
 
+    def after_half_step():
+        half_step_counter[0] += 1
+        if half_step_counter[0] % syndrome_every == 0:
+            append_syndrome_round()
+
     for _ in range(steps):
         # RZZ half-step -- stays parallel across color classes, same
         # physical pairs as the unencoded circuit (Eq. 6).
@@ -165,18 +192,20 @@ def build_iceberg_quench_circuit(k, color_edges, steps, dt, h_field, J,
         for edge_list in color_edges:
             for (i, j) in edge_list:
                 compile_logical_rzz(circuit, k, i, j, theta_zz, condition=cond)
-        append_syndrome_round()
+        after_half_step()
 
         # RX half-step -- sequential through the shared physical qubit t
         # (Eq. 1); see module docstring.
         cond = current_condition()
         for i in range(k):
             compile_logical_rx(circuit, k, i, theta_x, condition=cond)
-        append_syndrome_round()
+        after_half_step()
 
     # Final syndrome round (Fig. 1(e): extract S_X -- and, redundantly but
     # harmlessly, S_Z again -- before the destructive measurement, since
-    # S_X can't be recovered from a Z-basis measurement afterward).
+    # S_X can't be recovered from a Z-basis measurement afterward). Always
+    # appended regardless of syndrome_every, even if the last half-step
+    # already triggered one.
     append_syndrome_round()
     assert round_counter[0] == n_rounds_total
 

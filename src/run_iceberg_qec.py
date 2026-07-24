@@ -21,7 +21,7 @@ from persistence import save_stage_results
 from shot_observables import bitstrings_to_observables
 
 
-def compile_check(k=None, device_name=None, steps=None, early_exit=None):
+def compile_check(k=None, device_name=None, steps=None, early_exit=None, syndrome_every=1):
     """Tier-1 check (docs/ICEBERG_QEC_PLAN.md): compile the Iceberg-encoded
     circuit against `device_name` WITHOUT executing it -- a classical
     Nexus-side pass, no hardware queue, no quota cost -- and confirm the
@@ -43,7 +43,7 @@ def compile_check(k=None, device_name=None, steps=None, early_exit=None):
     color_edges = build_chain_color_edges(k)
     circuit, meta = build_iceberg_quench_circuit(
         k, color_edges, steps, config.ICEBERG_DT, config.ICEBERG_H, config.J,
-        early_exit=early_exit,
+        early_exit=early_exit, syndrome_every=syndrome_every,
     )
 
     project = qnx.projects.get_or_create(name="ftim-hackathon")
