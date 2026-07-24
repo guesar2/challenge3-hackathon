@@ -42,7 +42,10 @@ def _get_submit_fn():
         from fh_qnexus_backend import submit_vqe_batch_job
         return submit_vqe_batch_job, f"qnexus:{cfg.H2_DEVICE_NAME}"
     except Exception:
-        from local_emulator_backend import submit_vqe_batch_job #Creo que no funciona pero no me preocuparè por eso por ahora
+        # local_emulator_backend lives in src/, not this package -- only
+        # importable when src/ is also on sys.path (e.g. when this module
+        # runs via the repo root's main.py, which puts both on sys.path).
+        from local_emulator_backend import submit_vqe_batch_job
         return submit_vqe_batch_job, f"local-emulator:{cfg.H2_DEVICE_NAME}"
 
 

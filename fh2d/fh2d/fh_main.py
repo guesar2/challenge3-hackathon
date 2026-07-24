@@ -1,9 +1,10 @@
 """
 fh_main.py  --  entry point for the optional 2D Fermi-Hubbard extension.
 
-This is a separate, self-contained package (independent of the repo's main
-`main.py` / TFIM 1D pipeline). Runs the whole Fermi-Hubbard pipeline from a
-clean environment and reproduces every figure and headline number:
+This is a separate, self-contained package with no shared code with the
+repo's main TFIM 1D pipeline, but `python main.py` at the repo root runs it
+too, right after the TFIM pipeline. Runs the whole Fermi-Hubbard pipeline
+from a clean environment and reproduces every figure and headline number:
 
   0. self-checks        (JW consistency, free-fermion cross-check,
                          sector engine vs full-space engine)
@@ -30,7 +31,9 @@ import argparse
 import sys
 
 
-def main():
+def main(argv=None):
+    """Run the Fermi-Hubbard pipeline. `argv` defaults to sys.argv[1:]; pass
+    an explicit list (e.g. `[]`) when calling this from other code."""
     ap = argparse.ArgumentParser()
     ap.add_argument("--quick", action="store_true", help="skip VQE and the summary tables")
     ap.add_argument("--no-vqe", action="store_true", help="skip VQE and the summary tables")
@@ -38,7 +41,7 @@ def main():
     ap.add_argument("--no-noise", action="store_true",
                     help="skip the noisy + ZNE curves in the quench figure")
     ap.add_argument("--no-heatmap", action="store_true", help="skip the 3x4 heatmap stage")
-    args = ap.parse_args()
+    args = ap.parse_args(argv)
 
     print("=" * 70)
     print("2D FERMI-HUBBARD  --  Quantathon CR 2026 Challenge 3 (optional model)")

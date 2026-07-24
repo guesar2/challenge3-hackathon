@@ -41,12 +41,14 @@ env/
 .DS_Store
 Thumbs.db
 
-# Data outputs (keep structure, ignore large files)
-# Uncomment if data files are too large for git
-# data/*.npz
+# Data outputs — keep only the canonical *_latest.json pointer per stage,
+# ignore timestamped snapshots and other generated artifacts.
 data/*.json
-# figures/*.png
-# figures/*.pdf
+!data/*_latest.json
+
+# Figures generated when running scripts from inside src/ instead of the
+# repo root (python main.py writes to figures/ at the repo root instead)
+src/figures/
 
 # Quantinuum credentials (NEVER commit)
 *.token
@@ -55,9 +57,4 @@ data/*.json
 
 # Claude
 CLAUDE.md
-data/quench_latest.json
-data/h2_emulator_raw_latest.json
 docs/hackathon.pdf
-data/ed_latest.json
-data/h2_emulator_latest.json
-data/quench_latest.json

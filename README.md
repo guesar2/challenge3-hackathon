@@ -34,16 +34,21 @@ Codificación fermiónica (Jordan-Wigner / Bravyi-Kitaev) para redes pequeñas (
 ```
 quantathon-challenge3/
 ├── README.md                          ← Este archivo
+├── LICENSE                            ← MIT
 ├── requirements.txt                   ← Dependencias
-├── main.py                            ← Punto de entrada único (inserta src/ en sys.path y llama a ftim_main.main())
+├── main.py                            ← Punto de entrada único: corre el pipeline TFIM
+│                                          (ftim_main.main()) y luego la extensión Fermi-Hubbard 2D
+│                                          (fh_main.main()) en secuencia
 │
 ├── src/
-│   ├── ftim_main.py                   ← Orquestador: ejecuta las 4 secciones (run_*.py) en secuencia
-│   ├── run_ed.py                      ← Sección 1/4 — línea base ED, ejecutable de forma independiente
-│   ├── run_adiabatic.py               ← Sección 2/4 — barrido adiabático trotterizado (statevector local)
-│   ├── run_quench.py                  ← Sección 3/4 — evolución "quench" ED vs. Trotter local
-│   ├── run_h2_emulator.py             ← Sección 4/4 — quench, barrido adiabático y VQE contra el emulador Quantinuum H2 vía qnexus
-│   │                                     (no-op salvo que config.RUN_ON_H2_EMULATOR = True — consume cuota;
+│   ├── ftim_main.py                   ← Orquestador: ejecuta las 6 secciones TFIM (run_*.py) en secuencia
+│   ├── run_ed.py                      ← Sección 1/6 — línea base ED, ejecutable de forma independiente
+│   ├── run_adiabatic.py               ← Sección 2/6 — barrido adiabático trotterizado (statevector local)
+│   ├── run_quench.py                  ← Sección 3/6 — evolución "quench" ED vs. Trotter local
+│   ├── run_dt_convergence.py          ← Sección 4/6 — barrido de dt a tiempo fijo, confirma O(Δt²)
+│   ├── run_n_scaling.py               ← Sección 5/6 — escaneo Trotter-vs-ED de ruptura, N=4..20
+│   ├── run_h2_emulator.py             ← Sección 6/6 — quench, barrido adiabático y VQE contra el emulador Quantinuum H2 vía qnexus
+│   │                                     (gateado por config.RUN_ON_H2_EMULATOR — consume cuota;
 │   │                                      actualmente en True en config.py, ver nota más abajo)
 │   ├── config.py                      ← Parámetros de simulación (N, J, H_VALUES, dt, H2_*, H2_ADIABATIC_*, H2_VQE_*, etc.)
 │   ├── pauli_ops.py                   ← Operadores de Pauli + construcción del Hamiltoniano TFIM
@@ -63,32 +68,43 @@ quantathon-challenge3/
 │   ├── plot_h2_comparison.py          ← Script auxiliar para regenerar gráficos H2 vs. ED a partir de datos ya guardados en data/
 │   ├── reporting.py                   ← Tabla comparativa Trotter vs. ED en consola
 │   ├── persistence.py                 ← Guardado/carga de resultados por etapa en data/ (JSON con timestamp + puntero *_latest.json)
-│   ├── figures/                       ← Figuras generadas por defecto al ejecutar desde src/
-│   └── trotter_circuit.py, observables.py,
-│       tfim_hamiltonian.py, fermi_hubbard.py
-│                                       ← Placeholders vacíos (0 bytes), refactorizados hacia
-│                                         los módulos de arriba; no importar desde aquí
+│   ├── run_zne.py / zne_fit.py        ← Análisis adicional: Zero-Noise Extrapolation contra el H2-Emulator real (no corre desde main.py)
+│   ├── run_noise_scaling.py           ← Análisis adicional: caracterización del ruido real de H2-Emulator vs. N y profundidad (no corre desde main.py)
+│   ├── run_quantum_advantage.py       ← Análisis adicional: costo clásico (ED) vs. costo del circuito Trotter, sin cuota (no corre desde main.py)
+│   ├── iceberg_code.py, iceberg_circuits.py,
+│   │   iceberg_tfim_circuit.py, iceberg_decode.py
+│   │                                  ← Código de detección de errores Iceberg [[k+2,k,2]] (arXiv:2211.06703):
+│   │                                     álgebra de estabilizadores, circuitos pytket, codificación del circuito
+│   │                                     de quench TFIM, y decodificación clásica de los shots
+│   ├── run_iceberg_qec.py             ← Análisis adicional: corrida piloto Iceberg vs. H2-Emulator real
+│   │                                     (gateado por config.ICEBERG_RUN_ON_H2_EMULATOR, False por defecto; no corre desde main.py)
+│   ├── plot_iceberg_comparison.py     ← Regenera la comparación Iceberg vs. ED/ZNE desde datos ya guardados, sin cuota
+│   └── fermi_hubbard.py               ← Modelo Fermi-Hubbard 2D (JW, disperso) — implementación previa, no
+│                                          importada por ningún otro módulo de src/; superada por el paquete
+│                                          completo fh2d/ (no confundir uno con el otro)
 │
 ├── notebooks/
-│   ├── 01_exact_diagonalization.ipynb ← Línea base clásica
-│   ├── 02_trotter_simulation.ipynb    ← Simulación trotterizada
-│   ├── 03_phase_transition.ipynb        ← Barrido h/J y transición de fase
-│   └── 04_optional_fermi_hubbard.ipynb ← Extensión Fermi-Hubbard 2D
+│   ├── 01_exact_diagonalization.ipynb ← Vacío — pendiente
+│   ├── 02_trotter_simulation.ipynb    ← Vacío — pendiente
+│   ├── 03_phase_transition.ipynb      ← Vacío — pendiente
+│   ├── 04_optional_FermiHubbard.ipynb ← Extensión Fermi-Hubbard 2D (contenido real)
+│   ├── 04_optional_fermi_hubbard.ipynb ← Vacío — duplicado de nombre del anterior, pendiente de limpieza
+│   ├── TFIM_LíneaBase_SinRuido.ipynb  ← Desarrollo interactivo del TFIM sin ruido (notebook de trabajo, contenido real)
+│   └── pauli_ops.py                   ← Copia de trabajo de src/pauli_ops.py para desarrollo interactivo en notebooks
 │
 ├── figures/                           ← Figuras generadas al ejecutar `python main.py` desde la raíz
 │
-├── fh2d/                               ← Extensión opcional independiente: Fermi-Hubbard 2D
-│   └── fh2d/fh_main.py                ← Punto de entrada propio de esta extensión (no forma parte
-│                                          de `python main.py`; ver "Extensión opcional" más abajo)
+├── fh2d/                               ← Extensión opcional: Fermi-Hubbard 2D (paquete propio,
+│   └── fh2d/fh_main.py                   sin código compartido con src/; `python main.py` la
+│                                          ejecuta también, después del pipeline TFIM — ver más abajo)
 │
 └── docs/
-    ├── TECHNICAL_REPORT.md            ← Borrador del informe técnico (máx. 8 pp.)
-    ├── PRESENTATION.md                ← Guión de la presentación (5 min)
-    ├── SDK_REFLECTION.md              ← Reflexión sobre SDK (≤200 palabras)
-    ├── PLAN.md                        ← Plan de trabajo del hackathon
-    └── CHECKLIST.md                   ← Checklist de entregables
-
-
+    ├── TECHNICAL_REPORT.md            ← Informe técnico (máx. 8 pp.)
+    ├── PRESENTATION.md                ← Guión de la presentación (5 min) — pendiente
+    ├── SDK_REFLECTION.md              ← Reflexión sobre SDK (≤200 palabras) — pendiente
+    ├── PLAN.md                        ← Plan de trabajo del hackathon (nota interna)
+    ├── ICEBERG_QEC_PLAN.md            ← Plan de diseño del código Iceberg QEC (nota interna)
+    └── CHECKLIST.md                   ← Checklist de entregables (nota interna)
 ```
 
 ---
@@ -134,25 +150,42 @@ pip install -r requirements.txt
 ```bash
 source venv/bin/activate
 python main.py                  # desde la raíz del repo — reproduce todas las figuras/cifras
-# equivalente:
-python src/ftim_main.py         # ejecutar desde src/, o con src/ en sys.path
 ```
 
-Este script orquesta las cuatro secciones del pipeline en secuencia, con parámetros centralizados en `src/config.py`:
+Este script orquesta el pipeline TFIM (`src/ftim_main.py`, seis secciones) y luego la extensión Fermi-Hubbard 2D (`fh2d/fh2d/fh_main.py`) en secuencia:
 1. `run_ed.py` — `ed_baseline`: observables del estado fundamental (ED) para `config.H_VALUES`
 2. `run_adiabatic.py` — `run_adiabatic_simulation`: barrido adiabático trotterizado (statevector local, Qiskit) desde `config.H_INIT` hasta cada `h` objetivo, comparado contra ED
 3. `run_quench.py` — evolución "quench" desde el estado producto `|0...0⟩`, comparando `ed_time_evolution_exact` vs. `run_trotter_fixed_hamiltonian` (objetivo: <5% de desviación en ⟨Z⟩ y ⟨ZᵢZᵢ₊₁⟩)
-4. `run_h2_emulator.py` — el mismo circuito de quench, construido en pytket, enviado al emulador Quantinuum H2 vía `qnexus` — pensado para estar **desactivado por defecto**; solo corre si `config.RUN_ON_H2_EMULATOR = True` (ver nota de cuota arriba)
+4. `run_dt_convergence.py` — barrido de `dt` a tiempo total fijo, confirma la convergencia O(Δt²) del Trotter de segundo orden (`figures/dt_convergence.png`)
+5. `run_n_scaling.py` — escaneo Trotter-vs-ED de ruptura, N=4..20 (`figures/n_scaling.png`)
+6. `run_h2_emulator.py` — el mismo circuito de quench, construido en pytket, enviado al emulador Quantinuum H2 vía `qnexus` — gateado por `config.RUN_ON_H2_EMULATOR`, **actualmente `True`** (ver nota de cuota arriba: esta sección consume cuota real en cada corrida a menos que se ponga en `False`)
+7. `fh2d/fh2d/fh_main.py` — extensión opcional Fermi-Hubbard 2D (paquete separado, sin código compartido con `src/`) — ver más abajo; su propio `fh2d/fh2d/fh_config.py` también tiene `RUN_ON_H2_EMULATOR = True` por defecto, así que también consume cuota real
 
 ### Ejecución de una sola sección
 
 Cada sección es independiente — calcula su propia línea base ED y no depende de que las demás se hayan ejecutado antes — así que se puede verificar una sin correr el resto:
 
 ```bash
-python src/run_ed.py            # solo línea base ED (rápido, puramente clásico)
-python src/run_adiabatic.py     # solo el barrido adiabático
-python src/run_quench.py        # solo la evolución "quench"
-python src/run_h2_emulator.py   # requiere config.RUN_ON_H2_EMULATOR = True — consume cuota
+python src/run_ed.py             # solo línea base ED (rápido, puramente clásico)
+python src/run_adiabatic.py      # solo el barrido adiabático
+python src/run_quench.py         # solo la evolución "quench"
+python src/run_dt_convergence.py # solo el barrido de convergencia dt
+python src/run_n_scaling.py      # solo el escaneo Trotter-vs-ED, N=4..20
+python src/run_h2_emulator.py    # consume cuota real (config.RUN_ON_H2_EMULATOR = True por defecto)
+```
+
+### Análisis adicionales (no incluidos en `main.py`)
+
+Estos scripts son análisis más profundos, independientes del pipeline por
+defecto — cada uno se ejecuta a mano cuando se lo necesita, no como parte
+de `python main.py`:
+
+```bash
+python src/run_zne.py                # Zero-Noise Extrapolation contra el H2-Emulator real (qermit Folding.circuit + src/zne_fit.py) — consume cuota
+python src/run_noise_scaling.py      # Caracteriza cómo escala el modelo de ruido real de H2-Emulator con N y con profundidad de circuito — consume cuota
+python src/run_quantum_advantage.py  # Compara el costo clásico medido (ED) contra el costo del circuito Trotter (puertas/profundidad vs. N) — puramente clásico, sin cuota
+python src/run_iceberg_qec.py        # Corrida piloto del código de detección de errores Iceberg [[k+2,k,2]] (src/iceberg_*.py) contra el H2-Emulator real — gateado por config.ICEBERG_RUN_ON_H2_EMULATOR (False por defecto) — consume cuota si se activa
+python src/plot_iceberg_comparison.py # Regenera la comparación Iceberg vs. ED/ZNE a partir de datos ya guardados — sin cuota
 ```
 
 ### Funciones adicionales del emulador H2 (fuera de `main.py`)
@@ -200,12 +233,17 @@ gastar cuota confirmando una vez en qnexus.
 jupyter notebook notebooks/
 ```
 
-| Notebook | Contenido | Tiempo estimado |
-|----------|-----------|-----------------|
-| `01_exact_diagonalization.ipynb` | Línea base ED, validación de observables | ~10 min |
-| `02_trotter_simulation.ipynb` | Construcción de circuitos, análisis de error Trotter | ~15 min |
-| `03_phase_transition.ipynb` | Barrido h/J, gráficos de magnetización | ~10 min |
-| `04_optional_fermi_hubbard.ipynb` | Extensión Fermi-Hubbard 2D (opcional) | ~20 min |
+| Notebook | Contenido | Estado |
+|----------|-----------|--------|
+| `01_exact_diagonalization.ipynb` | Línea base ED, validación de observables | Vacío — pendiente |
+| `02_trotter_simulation.ipynb` | Construcción de circuitos, análisis de error Trotter | Vacío — pendiente |
+| `03_phase_transition.ipynb` | Barrido h/J, gráficos de magnetización | Vacío — pendiente |
+| `TFIM_LíneaBase_SinRuido.ipynb` | Desarrollo interactivo del TFIM sin ruido (equivalente de trabajo a 01-03) | Contenido real |
+| `04_optional_FermiHubbard.ipynb` | Extensión Fermi-Hubbard 2D (opcional) | Contenido real |
+| `04_optional_fermi_hubbard.ipynb` | — | Vacío, nombre duplicado del anterior — pendiente de limpieza |
+
+> El pipeline principal (`python main.py`) no depende de ningún notebook —
+> son material de desarrollo interactivo, no parte del entregable ejecutable.
 
 ---
 
@@ -359,13 +397,14 @@ hardware ya devolvió.
 
 ---
 
-## Extensión opcional independiente: Fermi-Hubbard 2D (`fh2d/`)
+## Extensión opcional: Fermi-Hubbard 2D (`fh2d/`)
 
 `fh2d/` es un paquete separado y autocontenido — no comparte código con
-`src/` ni se ejecuta desde `main.py` — que implementa el modelo de
-Fermi-Hubbard 2D (codificación Jordan-Wigner, ED, dinámica de Trotter, VQE)
-como demostración adicional más allá del TFIM 1D requerido. Tiene su propio
-punto de entrada:
+`src/` — que implementa el modelo de Fermi-Hubbard 2D (codificación
+Jordan-Wigner, ED, dinámica de Trotter, VQE) como demostración adicional
+más allá del TFIM 1D requerido. `python main.py` en la raíz ejecuta esta
+extensión automáticamente después del pipeline TFIM (sección 5 de "Uso"
+arriba); también puede ejecutarse sola con su propio punto de entrada:
 
 ```bash
 cd fh2d/fh2d
@@ -374,9 +413,9 @@ python fh_main.py --quick       # salta VQE y las tablas resumen
 ```
 
 Ver el docstring de `fh_main.py` para el resto de las banderas
-(`--no-vqe`, `--no-shots`, `--no-noise`, `--no-heatmap`). Este script es
-independiente del `main.py` de la raíz, que sigue siendo el único punto de
-entrada para el pipeline principal (TFIM 1D).
+(`--no-vqe`, `--no-shots`, `--no-noise`, `--no-heatmap`) — estas solo
+aplican a la ejecución independiente; `python main.py` siempre corre el
+pipeline completo de la extensión.
 
 ---
 
@@ -393,7 +432,7 @@ entrada para el pipeline principal (TFIM 1D).
 
 ## Autores
 
-- **[Tu nombre]** — Física / Ciencia de Materiales / Computación Cuántica
+- **Equipo Challenge 3** — Física / Ciencia de Materiales / Computación Cuántica
 - Hackathon Quantathon CR 2026 · Challenge 3
 
 ## Licencia
@@ -402,4 +441,4 @@ MIT License — ver [LICENSE](LICENSE) para detalles.
 
 ---
 
-> **Nota para jueces:** Todo el código es reproducible desde un entorno limpio usando `requirements.txt`. El script `main.py` en la raíz del repositorio es el único punto de entrada necesario para regenerar todas las figuras y cifras reportadas de las secciones 1–3 (más el quench de la sección 4). La sección 4 completa — emulador Quantinuum H2: quench, barrido adiabático y VQE — requiere `config.RUN_ON_H2_EMULATOR = True` y una sesión de `qnexus`, ya que consume cuota de uso medida; el barrido adiabático (`--phase-transition`) y el VQE (`--vqe`) se invocan aparte de `main.py` por costo adicional de cuota (ver "Funciones adicionales del emulador H2" arriba).
+> **Nota para jueces:** Todo el código es reproducible desde un entorno limpio usando `requirements.txt`. El script `main.py` en la raíz del repositorio es el único punto de entrada necesario para regenerar todas las figuras y cifras reportadas de las secciones 1–3 (más el quench de la sección 4) y de la extensión Fermi-Hubbard 2D (`fh2d/`). La sección 4 completa — emulador Quantinuum H2: quench, barrido adiabático y VQE — requiere `config.RUN_ON_H2_EMULATOR = True` y una sesión de `qnexus`, ya que consume cuota de uso medida; el barrido adiabático (`--phase-transition`) y el VQE (`--vqe`) se invocan aparte de `main.py` por costo adicional de cuota (ver "Funciones adicionales del emulador H2" arriba). La extensión Fermi-Hubbard 2D también tiene su propio interruptor de cuota, `fh2d/fh2d/fh_config.py`'s `RUN_ON_H2_EMULATOR` (activado por defecto, igual que el de `src/config.py`) — su corrida de emulador H2 consume cuota real de `qnexus` cuando `python main.py` la ejecuta.
