@@ -27,9 +27,17 @@ leading Rx) -- a syndrome-measurement round sits between every half-step
 by design, so there's no adjacent-Rx boundary left to fuse.
 
 Ancillas (a1, a2) are reused across every syndrome round: measured into a
-fresh pair of bits in the shared "flags" register each round, then Reset
+fresh 2-bit register each round ("flags_r0", "flags_r1", ...), then Reset
 before the next round touches them -- exactly as the paper's own Fig. 1(d)
 describes ("two additional ancilla qubits, which can be reset and reused").
+One small register per round rather than a single concatenated "flags"
+register spanning all rounds is deliberate, not cosmetic: Quantinuum's
+H2-Emulator caps classical register width at 64 bits (a QIR-conversion
+limit, `ClassicalRegisterWidthError`) -- discovered the hard way when a
+k=8, 30-step, syndrome_every=1 circuit (61 rounds x 2 bits = 122-bit
+"flags" register) was rejected server-side on submission. Per-round
+registers keep every register at exactly 2 bits regardless of how many
+rounds a circuit has.
 
 Real-time early exit (early_exit=True, the default): rather than running
 every Trotter step to completion regardless and discarding in classical
@@ -118,10 +126,13 @@ def build_iceberg_quench_circuit(k, color_edges, steps, dt, h_field, J,
         syndrome_every, plus 1 for the always-present final round)
       - "data_creg_name": classical register holding the final n-bit
         destructive measurement
-      - "flags_creg_name": classical register holding every round's (a1,
-        a2) outcomes, concatenated in round order (2 bits per round) --
-        feed both registers' per-shot bitstrings into
-        iceberg_decode.decode_shots.
+      - "flags_creg_names": list of n_rounds 2-bit classical register
+        names, one per syndrome round ("flags_r0", "flags_r1", ...) --
+        each round's (a1, a2) outcome, kept separate rather than one
+        large concatenated register (see module docstring: avoids a
+        64-bit-per-register limit on H2-Emulator). Concatenate their
+        per-shot bitstrings, in this list's order, before feeding into
+        iceberg_decode.decode_shots alongside the data register.
       - "discard_creg_name": (only if early_exit) the running 1-bit
         discard flag -- purely informational/for early-exit gating, NOT
         a substitute for iceberg_decode.should_discard's own check on the
@@ -153,7 +164,7 @@ def build_iceberg_quench_circuit(k, color_edges, steps, dt, h_field, J,
     n_half_steps = 2 * steps
     n_mid_rounds = n_half_steps // syndrome_every
     n_rounds_total = n_mid_rounds + 1  # always end with one final round
-    flags_creg = circuit.add_c_register("flags", 2 * n_rounds_total)
+    flags_cregs = [circuit.add_c_register(f"flags_r{r}", 2) for r in range(n_rounds_total)]
     round_counter = [0]
     half_step_counter = [0]
 
@@ -170,13 +181,14 @@ def build_iceberg_quench_circuit(k, color_edges, steps, dt, h_field, J,
         syn_map = {i: i for i in range(n)} | {syn_a1: a1, syn_a2: a2}
         _append_circuit(circuit, syn_circuit, syn_map, condition=current_condition())
         r = round_counter[0]
-        circuit.Measure(circuit.qubits[a1], flags_creg[2 * r])
-        circuit.Measure(circuit.qubits[a2], flags_creg[2 * r + 1])
+        round_creg = flags_cregs[r]
+        circuit.Measure(circuit.qubits[a1], round_creg[0])
+        circuit.Measure(circuit.qubits[a2], round_creg[1])
         circuit.Reset(circuit.qubits[a1])
         circuit.Reset(circuit.qubits[a2])
         if early_exit:
             circuit.add_clexpr_from_logicexp(
-                discard_creg[0] | flags_creg[2 * r] | flags_creg[2 * r + 1], [discard_creg[0]]
+                discard_creg[0] | round_creg[0] | round_creg[1], [discard_creg[0]]
             )
         round_counter[0] += 1
 
@@ -217,7 +229,7 @@ def build_iceberg_quench_circuit(k, color_edges, steps, dt, h_field, J,
         "n": n,
         "n_rounds": n_rounds_total,
         "data_creg_name": "data",
-        "flags_creg_name": "flags",
+        "flags_creg_names": [f"flags_r{r}" for r in range(n_rounds_total)],
     }
     if early_exit:
         metadata["discard_creg_name"] = "discard"

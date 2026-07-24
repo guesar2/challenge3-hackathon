@@ -549,8 +549,8 @@ class VqeSession:
 
 
 def submit_iceberg_quench_batch(k, h_field, J, dt, step_counts, n_shots, device_name="H2-Emulator",
-                                 early_exit=True, project_name="ftim-hackathon", job_name=None,
-                                 timeout=300.0):
+                                 early_exit=True, syndrome_every=1, project_name="ftim-hackathon",
+                                 job_name=None, timeout=300.0):
     """Iceberg-encoded counterpart to submit_quench_batch: builds,
     uploads, compiles, and runs an Iceberg-encoded TFIM quench circuit
     (iceberg_tfim_circuit.build_iceberg_quench_circuit) for every step
@@ -565,6 +565,14 @@ def submit_iceberg_quench_batch(k, h_field, J, dt, step_counts, n_shots, device_
     caller was already using for the unencoded circuit (k must be even,
     same constraint as every other N/H2_* value in config.py).
 
+    timeout: raise well above the qnx.execute default (300s) for anything
+    beyond a shallow pilot -- a k=8, steps=5 circuit already took ~2.5
+    minutes just to compile server-side, and a 30-step circuit is several
+    times deeper. A timeout that expires does NOT mean the job failed or
+    wasted quota -- it keeps running server-side and must be recovered by
+    its job id (qnx.jobs.get(id=...) + qnx.jobs.wait_for/results), never
+    by resubmitting, which would duplicate the quota spend.
+
     Costs against the qnexus usage quota -- call only with explicit
     approval, same as submit_quench_batch. Before ever calling this,
     confirm with a qnx.compile()-only pass (no execute, no quota cost)
@@ -572,11 +580,19 @@ def submit_iceberg_quench_batch(k, h_field, J, dt, step_counts, n_shots, device_
     bit-list-per-register lookup below assumes compilation preserves each
     circuit's classical registers (names, bit order) unchanged, which
     should be checked once against a downloaded compiled circuit before
-    trusting it for a real run, not assumed.
+    trusting it for a real run, not assumed. Also confirm this at the
+    actual step count intended for execution, not just a shallow pilot --
+    a compile check at steps=5 does not catch a register-width problem
+    that only appears at steps=30 (see iceberg_tfim_circuit.py's
+    docstring on the 64-bit-per-register limit that did exactly this).
 
     Returns {step_count: {"data_bitstrings": [...], "flags_bitstrings":
     [...], "n": n, "n_rounds": n_rounds}} -- zip data_bitstrings and
     flags_bitstrings and feed the pairs into iceberg_decode.decode_shots.
+    flags_bitstrings are the concatenation, in round order, of every
+    per-round flags register (see build_iceberg_quench_circuit's
+    docstring on why they're kept as separate small registers rather than
+    one large one).
     """
     color_edges = build_chain_color_edges(k)
     project = get_project(project_name)
@@ -586,7 +602,7 @@ def submit_iceberg_quench_batch(k, h_field, J, dt, step_counts, n_shots, device_
     metas = []
     for steps in step_counts:
         circ, meta = build_iceberg_quench_circuit(
-            k, color_edges, steps, dt, h_field, J, early_exit=early_exit
+            k, color_edges, steps, dt, h_field, J, early_exit=early_exit, syndrome_every=syndrome_every
         )
         circuits.append(circ)
         metas.append(meta)
@@ -622,7 +638,9 @@ def submit_iceberg_quench_batch(k, h_field, J, dt, step_counts, n_shots, device_
     out = {}
     for steps, meta, circ, result in zip(step_counts, metas, circuits, results):
         data_bits = list(circ.get_c_register(meta["data_creg_name"]))
-        flags_bits = list(circ.get_c_register(meta["flags_creg_name"]))
+        flags_bits = [
+            bit for name in meta["flags_creg_names"] for bit in circ.get_c_register(name)
+        ]
         out[steps] = {
             "data_bitstrings": ["".join(str(bit) for bit in shot) for shot in result.get_shots(data_bits)],
             "flags_bitstrings": ["".join(str(bit) for bit in shot) for shot in result.get_shots(flags_bits)],

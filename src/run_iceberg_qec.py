@@ -25,10 +25,20 @@ def compile_check(k=None, device_name=None, steps=None, early_exit=None, syndrom
     """Tier-1 check (docs/ICEBERG_QEC_PLAN.md): compile the Iceberg-encoded
     circuit against `device_name` WITHOUT executing it -- a classical
     Nexus-side pass, no hardware queue, no quota cost -- and confirm the
-    "data"/"flags" classical registers survive compilation with their
+    "data"/"flags_r*" classical registers survive compilation with their
     names and bit order intact (qnexus_backend.submit_iceberg_quench_batch
     assumes this; this function is how to verify it before ever spending
     quota on a real run).
+
+    KNOWN GAP: this does not catch every execute-time-only failure. A
+    ClassicalRegisterWidthError (H2-Emulator caps classical register width
+    at 64 bits) was only raised from qnx.execute's job status, not from
+    qnx.compile -- QIR conversion appears to happen at execute time, not
+    compile time -- so a passing compile_check does not guarantee a
+    subsequent execute() will succeed. Run compile_check at the actual
+    step count intended for execution regardless (it still catches
+    gateset/routing problems), but treat a pass as necessary, not
+    sufficient.
 
     Returns True if the compile succeeded and the register assumption
     held; raises otherwise (surfacing exactly what broke).
@@ -55,7 +65,7 @@ def compile_check(k=None, device_name=None, steps=None, early_exit=None, syndrom
     )[0]
     compiled_circuit = compiled_ref.download_circuit()
 
-    for name in (meta["data_creg_name"], meta["flags_creg_name"]):
+    for name in (meta["data_creg_name"], *meta["flags_creg_names"]):
         reg = compiled_circuit.get_c_register(name)
         assert len(reg) == len(circuit.get_c_register(name)), (
             f"register {name!r} changed size across compilation -- "
