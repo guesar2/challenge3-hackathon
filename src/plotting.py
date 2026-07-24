@@ -52,7 +52,7 @@ def _finalize(fig, filename, save_dir):
 def plot_ed_scaling(h_values, ed_results_by_N, save_dir=None, filename="ed_scaling.png"):
     """<X>, <Z>_rms, and <Zi Zi+1> vs. h/J, one line per system size N --
     the observable side of the scaling comparison (run_ed.py runs ED at
-    every N in config.N_SCALING_VALUES and passes them all here).
+    every N in config.ED_EXTRA_N_VALUES and passes them all here).
 
     ed_results_by_N: dict N -> list of per-h dicts as returned by
     exact_diagonalization.ed_baseline (each {'h', 'mz_rms', 'mx', 'mzz',
@@ -127,6 +127,88 @@ def plot_ed_runtime_scaling(timings, extrapolate_to=None, save_dir=None,
     ax.set_xticks(N_vals if extrapolate_to is None else np.arange(N_vals.min(), extrapolate_to + 1, 2))
     ax.grid(True, which='both', alpha=0.3)
     ax.legend(fontsize=9)
+    _finalize(fig, filename, save_dir)
+    return fig
+
+
+def plot_quantum_advantage_scaling(ed_timings, circuit_costs, extrapolate_to=None,
+                                    gate_threshold=50, save_dir=None,
+                                    filename="quantum_advantage_scaling.png"):
+    """The "do we observe quantum advantage?" figure: classical ED
+    wall-clock cost vs. N (same measured+extrapolated series as
+    plot_ed_runtime_scaling) overlaid with the Trotter circuit's own cost
+    (gate count / depth vs. N, cheap to compute up to N=20 -- no
+    statevector or ED work needed, just building the circuit).
+
+    ed_timings: list of {'N', 'time_s'} dicts (measured only, no
+    extrapolated points mixed in -- extrapolation is computed here, same
+    log-linear-fit convention as plot_ed_runtime_scaling).
+    circuit_costs: list of {'N', 'depth', 'gate_count'} dicts, one Trotter
+    layer's cost at each N (does not depend on dt/h/J, only N and the
+    chain's edge coloring -- see run_n_scaling._trotter_circuit_cost).
+    gate_threshold: horizontal reference line at the hackathon brief's
+    "circuits with >~50 gates on current hardware are noise-dominated"
+    threshold (docs/hackathon.pdf, "Honest limitations").
+
+    Two side-by-side panels, not one shared axis: seconds (classical ED)
+    and gate count/depth (quantum circuit) are different units with no
+    real conversion between them, so overlaying them on one log-scale axis
+    would visually imply an equivalence ("N gates ~ N seconds") that isn't
+    real. Each panel keeps its own native unit; what's compared across
+    panels is the *shape* (exponential blowup vs. flat/linear growth) at
+    the same x=N, not the magnitudes.
+    """
+    ed_N = np.array([t['N'] for t in ed_timings])
+    ed_t = np.array([t['time_s'] for t in ed_timings])
+    circ_N = np.array([c['N'] for c in circuit_costs])
+    circ_gates = np.array([c['gate_count'] for c in circuit_costs])
+    circ_depth = np.array([c['depth'] for c in circuit_costs])
+    all_N = np.union1d(ed_N, np.arange(ed_N.min(), extrapolate_to + 1) if extrapolate_to else ed_N)
+    all_N = np.union1d(all_N, circ_N)
+
+    fig, (ax_ed, ax_circ) = plt.subplots(1, 2, figsize=(13, 5.5))
+
+    ax_ed.semilogy(ed_N, ed_t, 'o-', color='indianred', markersize=8,
+                    label='Measured')
+    if extrapolate_to and extrapolate_to > ed_N.max():
+        fit_slope, fit_intercept = np.polyfit(ed_N, np.log(ed_t), 1)
+        N_ext = np.arange(ed_N.max(), extrapolate_to + 1)
+        t_ext = np.exp(fit_intercept + fit_slope * N_ext)
+        ax_ed.semilogy(N_ext, t_ext, 'o--', color='indianred', markersize=6, alpha=0.6,
+                        label='Extrapolated (log-linear fit, NOT run)')
+    for seconds, label in ((3600, '1 hour'), (86400, '1 day')):
+        if extrapolate_to:
+            ax_ed.axhline(seconds, color='gray', linestyle=':', alpha=0.5, linewidth=1)
+            ax_ed.annotate(label, xy=(all_N.max(), seconds), xytext=(-4, 4),
+                            textcoords='offset points', fontsize=8, color='gray', ha='right')
+    ax_ed.set_xlabel('N (number of spins)')
+    ax_ed.set_ylabel('Wall-clock time (s, log scale)')
+    ax_ed.set_title('Classical: ED cost vs. N')
+    ax_ed.set_xticks(np.arange(all_N.min(), all_N.max() + 1, 2))
+    ax_ed.grid(True, which='both', alpha=0.3)
+    ax_ed.legend(fontsize=8)
+
+    ax_circ.semilogy(circ_N, circ_gates, 's-', color='steelblue', markersize=8,
+                      label='Gate count')
+    ax_circ.semilogy(circ_N, circ_depth, '^-', color='seagreen', markersize=8,
+                      label='Circuit depth')
+    if gate_threshold:
+        ax_circ.axhline(gate_threshold, color='gray', linestyle=':', alpha=0.6, linewidth=1)
+        ax_circ.annotate(f'~{gate_threshold} gates: hardware noise\nstarts to dominate '
+                          '(docs/hackathon.pdf,\n"Honest limitations")',
+                          xy=(circ_N.min(), gate_threshold), xytext=(2, 4),
+                          textcoords='offset points', fontsize=8, color='gray')
+    ax_circ.set_xlabel('N (number of spins)')
+    ax_circ.set_ylabel('Gate count / depth (log scale)')
+    ax_circ.set_title('Quantum: Trotter circuit cost vs. N')
+    ax_circ.set_xticks(np.arange(all_N.min(), all_N.max() + 1, 2))
+    ax_circ.grid(True, which='both', alpha=0.3)
+    ax_circ.legend(fontsize=8)
+
+    fig.suptitle('Why no quantum advantage yet: classical ED cost explodes '
+                  'while Trotter circuit cost stays flat/linear\n'
+                  '(separate panels -- seconds and gate count are different units, not directly comparable)')
+    fig.tight_layout()
     _finalize(fig, filename, save_dir)
     return fig
 
@@ -287,7 +369,8 @@ def plot_h2_vs_ed_time(h_values, time_series_data, save_dir=None, saved_at=None,
     time_series_data: dict h -> {'times', 'z_h2', 'z_err', 'x_h2', 'x_err',
     'mzz_h2', 'mzz_err', 'z_ed', 'x_ed', 'mzz_ed'} (see
     run_h2_emulator.run()). *_err are shot-noise standard errors (bootstrap
-    over the raw measured shots), shown as error bars so the
+    over the raw measured shots -- see
+    shot_observables.bootstrap_observable_errors), shown as error bars so the
     hardware numbers aren't reported without a noise estimate alongside them.
     """
     fig, axes = plt.subplots(len(h_values), 3, figsize=(17, 4 * len(h_values)))
@@ -335,6 +418,208 @@ def plot_h2_vs_ed_time(h_values, time_series_data, save_dir=None, saved_at=None,
     return fig
 
 
+def plot_h2_noise_comparison(h_values, noiseless_data, noisy_data, save_dir=None,
+                              n=None, filename="h2_noise_comparison.png"):
+    """<Z>, <X>, and <Zi Zi+1> vs. time for the H2 emulator quench, overlaying
+    ED (exact), noiseless H2-1LE, and noisy H2-Emulator on the same axes so
+    the noisy-vs-noiseless gap (hardware noise, with Trotter error cancelled
+    since both ran the identical circuit) is visible directly, rather than
+    inferred from two separate noisy-vs-ED and noiseless-vs-ED figures.
+
+    noiseless_data / noisy_data: dicts h -> {...} in the same shape as
+    run_h2_emulator.run()'s `results` (see plot_h2_vs_ed_time's docstring)
+    -- both are expected to come from the same N/h/dt/steps configuration,
+    so their 'z_ed'/'x_ed'/'mzz_ed' and 'times' entries coincide; ED is
+    plotted once per panel from noiseless_data. The ED trace is omitted
+    entirely when 'z_ed' is None (run() skips it past config.H2_ED_MAX_N,
+    where dense diagonalization is no longer feasible) -- the noisy-vs-
+    noiseless comparison this plot is really for doesn't need it.
+    """
+    fig, axes = plt.subplots(len(h_values), 3, figsize=(17, 4 * len(h_values)))
+
+    for idx, h in enumerate(h_values):
+        r0 = noiseless_data[h]
+        r1 = noisy_data[h]
+        row = axes[idx] if len(h_values) > 1 else axes
+        has_ed = r0['z_ed'] is not None
+
+        ax1 = row[0]
+        if has_ed:
+            ax1.plot(r0['times'], r0['z_ed'], 'r-', linewidth=2, label='ED (exact)')
+        ax1.errorbar(r0['times'], r0['z_h2'], yerr=r0['z_err'], fmt='bo', markersize=6,
+                     capsize=4, label='H2-1LE (noiseless)')
+        ax1.errorbar(r1['times'], r1['z_h2'], yerr=r1['z_err'], fmt='m^', markersize=6,
+                     capsize=4, label='H2-Emulator (noisy)')
+        ax1.set_xlabel('Time t')
+        ax1.set_ylabel(r'$\langle Z \rangle$ (RMS per site)')
+        ax1.set_title(f'h/J = {h:.1f}' + (f', N={n}' if n is not None else ''))
+        ax1.grid(True, alpha=0.3)
+        ax1.legend(loc='best', fontsize=8)
+
+        ax2 = row[1]
+        if has_ed:
+            ax2.plot(r0['times'], r0['x_ed'], 'r-', linewidth=2, label='ED (exact)')
+        ax2.errorbar(r0['times'], r0['x_h2'], yerr=r0['x_err'], fmt='go', markersize=6,
+                     capsize=4, label='H2-1LE (noiseless)')
+        ax2.errorbar(r1['times'], r1['x_h2'], yerr=r1['x_err'], fmt='m^', markersize=6,
+                     capsize=4, label='H2-Emulator (noisy)')
+        ax2.set_xlabel('Time t')
+        ax2.set_ylabel(r'$\langle X \rangle$ (mean per site)')
+        ax2.set_title(f'h/J = {h:.1f}' + (f', N={n}' if n is not None else ''))
+        ax2.grid(True, alpha=0.3)
+        ax2.legend(loc='best', fontsize=8)
+
+        ax3 = row[2]
+        if has_ed:
+            ax3.plot(r0['times'], r0['mzz_ed'], 'r-', linewidth=2, label='ED (exact)')
+        ax3.errorbar(r0['times'], r0['mzz_h2'], yerr=r0['mzz_err'], fmt='bo', markersize=6,
+                     capsize=4, label='H2-1LE (noiseless)')
+        ax3.errorbar(r1['times'], r1['mzz_h2'], yerr=r1['mzz_err'], fmt='m^', markersize=6,
+                     capsize=4, label='H2-Emulator (noisy)')
+        ax3.set_xlabel('Time t')
+        ax3.set_ylabel(r'$\langle Z_i Z_{i+1} \rangle$')
+        ax3.set_title(f'h/J = {h:.1f}' + (f', N={n}' if n is not None else ''))
+        ax3.grid(True, alpha=0.3)
+        ax3.legend(loc='best', fontsize=8)
+
+    title = 'ED vs. noiseless (H2-1LE) vs. noisy (H2-Emulator)' + (f' -- N={n}' if n is not None else '')
+    fig.suptitle(title, fontsize=11)
+
+    _finalize(fig, filename, save_dir)
+    return fig
+
+
+def plot_zne_comparison(h_values, zne_data, save_dir=None, n=None,
+                         filename="h2_zne_comparison.png"):
+    """<Z>, <X>, and <Zi Zi+1> vs. time for the ZNE-mitigated H2 quench,
+    overlaying ED (exact), raw-noisy H2-Emulator (qermit Folding.circuit's
+    fold_factor=1, with a real bootstrap error bar), and ZNE-mitigated
+    (zne_fit.zne_extrapolate's zero-noise-limit fit, with its own
+    propagated error bar) -- same x-axis/time convention as
+    plot_h2_noise_comparison.
+
+    zne_data: dict h -> {'times', 'z_ed','z_raw','z_raw_err','z_zne',
+    'z_zne_err', 'mzz_ed','mzz_raw','mzz_raw_err','mzz_zne','mzz_zne_err',
+    and optionally 'x_ed','x_raw','x_raw_err','x_zne','x_zne_err'}, as
+    produced by run_zne.run()'s `results`. The <X> column is only drawn if
+    every h in `h_values` has x_* entries -- run_zne.run(bases=("z",))
+    (e.g. a cheap trial run covering only <Zi Zi+1>) omits them, and this
+    just drops that column rather than erroring.
+    """
+    all_columns = (
+        ('z', r'$\langle Z \rangle$ (RMS per site)'),
+        ('x', r'$\langle X \rangle$ (mean per site)'),
+        ('mzz', r'$\langle Z_i Z_{i+1} \rangle$'),
+    )
+    columns = [(key, ylabel) for key, ylabel in all_columns
+               if all(f'{key}_raw' in zne_data[h] for h in h_values)]
+
+    fig, axes = plt.subplots(len(h_values), len(columns),
+                              figsize=(6 * len(columns) + 2, 4 * len(h_values)), squeeze=False)
+
+    for row_idx, h in enumerate(h_values):
+        r = zne_data[h]
+        for col_idx, (key, ylabel) in enumerate(columns):
+            ax = axes[row_idx][col_idx]
+            ax.plot(r['times'], r[f'{key}_ed'], 'r-', linewidth=2, label='ED (exact)')
+            ax.errorbar(r['times'], r[f'{key}_raw'], yerr=r[f'{key}_raw_err'], fmt='m^', markersize=6,
+                        capsize=4, label='H2-Emulator (raw noisy)')
+            ax.errorbar(r['times'], r[f'{key}_zne'], yerr=r[f'{key}_zne_err'], fmt='go', markersize=6,
+                        capsize=4, label='ZNE-mitigated')
+            ax.set_xlabel('Time t')
+            ax.set_ylabel(ylabel)
+            ax.set_title(f'h/J = {h:.1f}' + (f', N={n}' if n is not None else ''))
+            ax.grid(True, alpha=0.3)
+            ax.legend(loc='best', fontsize=8)
+
+    title = 'ED vs. raw-noisy vs. ZNE-mitigated (H2-Emulator)' + (f' -- N={n}' if n is not None else '')
+    fig.suptitle(title, fontsize=11)
+
+    _finalize(fig, filename, save_dir)
+    return fig
+
+
+def plot_iceberg_comparison(h, zne_data_for_h, iceberg_points, save_dir=None, n=None,
+                             filename="h2_iceberg_comparison.png"):
+    """<Z> and <Zi Zi+1> vs. time, extending plot_zne_comparison's ED/raw-
+    noisy/ZNE-mitigated comparison (same colors/markers, so the two figures
+    read as a matched pair) with a sparse overlay of Iceberg-corrected
+    pilot points -- one blue square per (time, discard-rate) run, each with
+    its own bootstrap error bar, rather than a dense curve (the underlying
+    pilot only covers a handful of step counts, not every step ED/raw/ZNE
+    have).
+
+    zne_data_for_h: same shape as one h-entry of plot_zne_comparison's
+    zne_data (dict with times, z_ed, z_raw, z_raw_err, z_zne, z_zne_err,
+    mzz_ed, mzz_raw, mzz_raw_err, mzz_zne, mzz_zne_err) -- reuse
+    data/h2_zne_latest.json's results[str(h)] directly.
+
+    iceberg_points: list of dicts, one per Iceberg pilot run, each with
+    't', 'z', 'z_err', 'mzz', 'mzz_err', 'discard_rate', 'n_kept',
+    'n_shots' -- as produced by iceberg_decode.decode_shots +
+    shot_observables.bitstrings_to_observables/bootstrap_observable_errors
+    (see run_iceberg_qec.py).
+    """
+    columns = (
+        ('z', r'$\langle Z \rangle$ (RMS per site)'),
+        ('mzz', r'$\langle Z_i Z_{i+1} \rangle$'),
+    )
+    r = zne_data_for_h
+    fig, axes = plt.subplots(1, len(columns), figsize=(6 * len(columns) + 2, 4), squeeze=False)
+
+    iceberg_times = [p['t'] for p in iceberg_points]
+
+    for col_idx, (key, ylabel) in enumerate(columns):
+        ax = axes[0][col_idx]
+        ax.plot(r['times'], r[f'{key}_ed'], 'r-', linewidth=2, label='ED (exact)')
+        ax.errorbar(r['times'], r[f'{key}_raw'], yerr=r[f'{key}_raw_err'], fmt='m^', markersize=6,
+                    capsize=4, label='H2-Emulator (raw noisy)')
+        ax.errorbar(r['times'], r[f'{key}_zne'], yerr=r[f'{key}_zne_err'], fmt='go', markersize=6,
+                    capsize=4, label='ZNE-mitigated')
+        iceberg_vals = [p[key] for p in iceberg_points]
+        iceberg_errs = [p[f'{key}_err'] for p in iceberg_points]
+        ax.errorbar(iceberg_times, iceberg_vals, yerr=iceberg_errs, fmt='bs', markersize=8,
+                    capsize=4, label='Iceberg-corrected')
+        ax.set_xlabel('Time t')
+        ax.set_ylabel(ylabel)
+        ax.set_title(f'h/J = {h:.1f}' + (f', N={n}' if n is not None else ''))
+        ax.grid(True, alpha=0.3)
+        ax.legend(loc='best', fontsize=8)
+
+    title = 'ED vs. raw-noisy vs. ZNE vs. Iceberg-corrected (H2-Emulator)' + (f' -- N={n}' if n is not None else '')
+    fig.suptitle(title, fontsize=11)
+
+    _finalize(fig, filename, save_dir)
+    return fig
+
+
+def plot_iceberg_discard_rate(iceberg_points, save_dir=None, n=None,
+                               filename="h2_iceberg_discard_rate.png"):
+    """Discard rate (%) vs. time for a series of Iceberg pilot runs at
+    increasing circuit depth -- the "price to pay" companion to
+    plot_iceberg_comparison, mirroring the paper's own Fig. 2c/3b
+    (arXiv:2211.06703): more Trotter steps means more syndrome-measurement
+    rounds and more chances to flag a real error, so discard rate climbs
+    monotonically with depth on real noisy hardware.
+    """
+    times = [p['t'] for p in iceberg_points]
+    rates = [p['discard_rate'] * 100 for p in iceberg_points]
+
+    fig, ax = plt.subplots(figsize=(6, 4))
+    ax.plot(times, rates, 'go-', markersize=8)
+    for t, rate, p in zip(times, rates, iceberg_points):
+        ax.annotate(f"{p['n_kept']}/{p['n_shots']}", (t, rate), textcoords="offset points",
+                    xytext=(0, 8), ha='center', fontsize=7, color='dimgray')
+    ax.set_xlabel('Time t')
+    ax.set_ylabel('Discard rate (%)')
+    ax.set_title('Iceberg discard rate vs. circuit depth' + (f', N={n}' if n is not None else ''))
+    ax.set_ylim(0, 100)
+    ax.grid(True, alpha=0.3)
+
+    _finalize(fig, filename, save_dir)
+    return fig
+
+
 def plot_h2_phase_transition(h_values, h2_data, ed_results, save_dir=None, saved_at=None,
                               method_label="adiabatic", filename="h2_phase_transition.png"):
     """<Z>, <X>, and <Zi Zi+1> vs. h/J for an H2 ground-state-search protocol
@@ -344,9 +629,14 @@ def plot_h2_phase_transition(h_values, h2_data, ed_results, save_dir=None, saved
 
     h2_data: dict h -> {'z_h2', 'z_err', 'x_h2', 'x_err', 'mzz_h2',
     'mzz_err'} (see run_h2_emulator.run_phase_transition()/run_vqe()).
-    *_err are shot-noise standard errors.
-    h2_data entries without 'x_h2'/'x_err' (e.g. an older saved run_vqe() result)
-    fall back to NaN so the <X> panel just shows gaps rather than raising.
+    *_err are shot-noise standard errors
+    (shot_observables.bootstrap_observable_errors). h2_data entries without
+    'x_h2'/'x_err' (e.g. an older saved run_vqe() result) fall back to NaN
+    so the <X> panel just shows gaps rather than raising.
+
+    method_label/filename let callers distinguish which protocol produced
+    the data (e.g. "VQE" vs. the default "adiabatic") without duplicating
+    this function.
     """
     fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(16, 4.5))
 

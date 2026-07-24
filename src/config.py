@@ -36,6 +36,18 @@ ED_EXTRA_N_VALUES = (8, 10)  # Si quieren más iteraciones, metanle elementos a 
 # and the classical wall will sit further out, than it did against the
 # original dense-Pauli-operator implementation; raise these if your
 # machine has time/RAM to spare and you want to push the wall out further.
+# Measured on this machine: N=6/8/10/12 took 0.03s/0.12s/2.0s/104s
+# respectively -- note the N=10->12 jump (52x, not the ~4x that 2^N alone
+# would predict) comes largely from pauli_ops.py building each Pauli term
+# as a DENSE 2^N x 2^N matrix (np.kron) before sparsifying, and
+# build_collective_observables' Mz/Mx/Mzz operators staying dense
+# throughout -- i.e. this specific implementation's classical wall is hit
+# earlier than the Hilbert space's fundamental 2^N scaling alone would
+# force; a sparse-native rewrite would push it out further, but the
+# exponential trend itself doesn't go away, which is the actual point of
+# the comparison. N capped at 12 here -- N=14's dense 2^14 x 2^14
+# complex128 intermediate alone is ~4.3GB and, extrapolating the measured
+# trend, would take on the order of an hour, not worth actually running.
 N_RUNTIME_SCALING_VALUES = (6, 8, 10, 12)
 N_RUNTIME_SCALING_EXTRAPOLATE_TO = 20  # plot_ed_runtime_scaling fits the measured points and
                              # projects (dashed, clearly marked "not run") out to this N, to
@@ -92,30 +104,77 @@ N_SCALING_STEPS = 20                       #Modifiqué estos valores para el esc
 N_SCALING_NOISY_DEVICE = "H2-Emulator"
 N_SCALING_NOISY_SHOTS = 200 #Modifiqué estos valores para el escalado, pero cambiar a gusto
 
+# Iceberg [[k+2,k,2]] error-detection code (iceberg_code.py,
+# iceberg_circuits.py, iceberg_tfim_circuit.py) -- fills in the QEC-encoded
+# circuit run_n_scaling.py's run_noisy_stub() docstring says is missing.
+# k plays N's role (must be even, like every other N/H2_* value above).
+# OFF by default and gated SEPARATELY from RUN_ON_H2_EMULATOR above --
+# this is a new capability, not covered by any prior approval to spend
+# quota; flip to True only with explicit approval, same convention as
+# RUN_ON_H2_EMULATOR.
+ICEBERG_RUN_ON_H2_EMULATOR = False
+ICEBERG_K = 4                       # even; small to start -- see docs/ICEBERG_QEC_PLAN.md
+ICEBERG_DEVICE_NAME = "H2-Emulator"  # noisy -- the whole point is to see it catch real
+                                     # noise; H2-1LE would trivially show a 0% discard rate
+ICEBERG_H = 1.0                      # h/J probed (critical point, matches N_SCALING_H)
+ICEBERG_DT = 0.05
+ICEBERG_STEPS = 5                   # deliberately shallow to start -- each step compiles to
+                                     # 2 syndrome-measurement rounds (see iceberg_tfim_circuit.py),
+                                     # so circuit depth/cost grows faster with steps here than
+                                     # in the unencoded pipeline; raise only after a successful
+                                     # small pilot run
+ICEBERG_SHOTS = 200
+ICEBERG_EARLY_EXIT = True           # native condition= gating skips remaining two-qubit gates
+                                     # once a shot is already flagged for discard; False -> plain
+                                     # post-selection-only circuit (useful as an A/B comparison)
+
 # Quantinuum H2 emulator run (pytket circuit submitted via qnexus).
 # OFF by default: requires a live qnexus login and costs against a metered
 # usage quota. Flip to True only with explicit approval to spend quota.
 RUN_ON_H2_EMULATOR = True
-H2_DEVICE_NAME = "H2-1LE"    # H2 noiseless-leakage emulator (cheapest H2-family target)
+H2_DEVICE_NAME = "H2-1LE"    # H2 noiseless-local emulator (cheapest H2-family target)
 H2_DEVICE_NAME_NOISY = "H2-Emulator"  # H2's real noisy emulator counterpart to
                              # H2_DEVICE_NAME -- carries Quantinuum's published noise_specs
                              # (gate/SPAM/crosstalk/dephasing error rates), unlike H2-1LE's
                              # exact noiseless state-vector emulation (shot noise only -- see
-                             # qnexus_backend.py's module docstring). NOTE: "H2-1E" (used in
-                             # earlier drafts of this project) is NOT a valid qnexus device --
-                             # confirmed against the live qnexus device catalog
-                             # (qnexus.devices.get_all()), which only exposes H1-1LE/H2-1LE
-                             # (noiseless) and H1-Emulator/H2-Emulator (noisy, with embedded
-                             # noise_specs) -- real H2-1/H2-1E hardware access isn't in this
-                             # account's catalog at all. H2-Emulator still runs Nexus-side,
-                             # reached the same way as H2_DEVICE_NAME via qnx.execute() --
-                             # gated by RUN_ON_H2_EMULATOR, costs the same qnexus quota.
+                             # qnexus_backend.py's module docstring). NOTE: "H2-1E" (the name
+                             # used in this repo's earlier docstrings/comments) is NOT a valid
+                             # qnexus device -- confirmed against the live qnexus device
+                             # catalog (qnexus.devices.get_all()), which only exposes
+                             # H1-1LE/H2-1LE (noiseless) and H1-Emulator/H2-Emulator (noisy,
+                             # with embedded noise_specs) -- real H2-1/H2-1E hardware access
+                             # isn't in this account's catalog at all. Despite the
+                             # "local_emulator" system_type label, H2-Emulator still runs
+                             # Nexus-side (nexus_hosted=True), reached the same way as
+                             # H2_DEVICE_NAME via qnx.execute() -- gated by RUN_ON_H2_EMULATOR,
+                             # costs the same qnexus quota.
 H2_PROJECT_NAME = "ftim-hackathon"
 H2_N = 4                     # small chain -- keep circuit width/cost modest
 H2_H_VALUES = (0.5, 1.0, 2.0)         # single point at criticality by default
 H2_STEPS = 5                 # deliberately shallow (few Trotter steps -> lower cost)
 H2_DT = 0.1
 H2_SHOTS = 200
+
+# Default client-side wait (seconds) for a qnexus submission before
+# qnx.jobs.wait_for()/qnx.execute() raise TimeoutError -- the job itself
+# keeps running server-side; this only bounds how long the *client* blocks.
+# qnexus_backend.py's submit_quench_batch/submit_zne_batch/collect_quench_batch
+# all default to this value (still overridable per-call via their own
+# `timeout` kwarg, e.g. run_h2_emulator.run(timeout=...) / run_zne.run(timeout=...)).
+# run_noise_scaling.py's NOISE_SCALING_TIMEOUT/DEPTH_SCALING_TIMEOUT
+# deliberately override this default further (1800s) for its larger N/step
+# sweeps, which measured taking longer than the general default below.
+QNEXUS_TIMEOUT = 300.0
+
+# Above this N, run_h2_emulator.run() skips the dense-ED reference curve --
+# same 2^N x 2^N dense-diagonalization wall as N_SCALING_ED_MAX above, just
+# named separately since it gates a different script. Needed for an N-sweep
+# that goes past the classical wall (e.g. a hardware-noise-vs-N scan up to
+# the device's real qubit count) -- run() still returns z_h2/x_h2/mzz_h2
+# either way, so a noisy-vs-noiseless comparison (same circuit on both
+# devices, no ED needed) still works past this cutoff; only the vs-ED
+# Trotter-error check and the h2_vs_ed_time plot are skipped.
+H2_ED_MAX_N = 12
 
 # H2 adiabatic sweep (phase-transition signal on hardware). Independent of
 # the quench pipeline above. Ramp length is scaled per h_target via
@@ -155,8 +214,9 @@ H2_ADIABATIC_TRANSIT_TIME_FACTOR = 4  # for a target whose ramp *passes through*
                               # h/J=0.5 (free, 2000 shots) found <X> deviation of 9.00% at
                               # CRITICAL_TIME_FACTOR's 200 steps, 2.34% at 300, 0.43% at 400,
                               # and 3.22% at 500 (500's rise is shot noise, not a systematic
-                              # trend) -- 400 was the clear best and is comfortably under the
-                              # 5% target with margin for shot noise.
+                              # trend -- 2000 shots gives an <X> standard error comparable to
+                              # these percentages at this magnitude) -- 400 was the clear best
+                              # and is comfortably under the 5% target with margin for shot noise.
 H2_ADIABATIC_SHOTS = 2000    # bumped from 500 -- bootstrap SE at 500 shots was ~0.02 on
                              # observables of magnitude ~0.6-0.9, comparable in size to the
                              # 5% deviation target itself, making individual runs bounce
@@ -202,4 +262,23 @@ H2_VQE_SEED = 10             # matches the reference snippet's random.seed(a=10)
 # (measured ~36-46 evals for HVA, ~500 for the HEA fallback), so a high
 # ceiling costs nothing but a little wasted time if never reached.
 H2_VQE_SHOTS_LOCAL = 4000
+
+# H2 Zero-Noise Extrapolation (run_zne.py), via qermit's Folding.circuit
+# (qnexus_backend.submit_zne_batch) -- amplifies noise by folding the
+# circuit (C -> C C^-1 C ...) rather than the device's own error-rate
+# scale knob (config's noise_scale kwarg elsewhere), then extrapolates
+# back to the zero-noise limit (zne_fit.zne_extrapolate). Targets
+# run_noise_scaling.SHORT_TIME_N/SHORT_TIME_STEPS (N=8, steps=5, T=0.5) by
+# default -- see run_zne.run()'s docstring.
+H2_ZNE_FOLD_FACTORS = (1, 3, 5)   # ODD integers only -- Folding.circuit raises
+                             # otherwise. fold_factor=1 performs zero fold
+                             # iterations (verified) -- i.e. it IS the plain
+                             # raw-noisy circuit, not a separate submission.
+H2_ZNE_SHOTS = 2000          # shots PER fold factor -- same shot-noise-vs-
+                             # signal-size rationale as run_noise_scaling.
+                             # DEPTH_SCALING_SHOTS (total shots per h is
+                             # H2_ZNE_SHOTS * len(H2_ZNE_FOLD_FACTORS))
+H2_ZNE_FIT_DEG = 1           # zero-noise extrapolation polynomial degree
+                             # (1 = linear fit, ZNE's most common choice;
+                             # must be < len(H2_ZNE_FOLD_FACTORS))
 H2_VQE_MAX_ITERS_LOCAL = 500
